@@ -1,0 +1,94 @@
+package com.example
+
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
+import com.example.model.AnimationMode
+import com.example.model.EdgeConfig
+import com.example.model.LineStyle
+import com.example.rendering.EdgeLightRenderer
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
+import org.robolectric.annotation.GraphicsMode
+import java.io.File
+import java.io.FileOutputStream
+
+/**
+ * Rendert jeden Linienstil in eine echte Bitmap (Robolectric NATIVE-Grafik) und speichert PNGs
+ * unter build/snapshots zur Sichtprüfung. Prüft zusätzlich, dass die Aura weich ausläuft.
+ */
+@RunWith(RobolectricTestRunner::class)
+@GraphicsMode(GraphicsMode.Mode.NATIVE)
+@Config(sdk = [34])
+class RenderSnapshotTest {
+
+    private val w = 540
+    private val h = 1200
+
+    private fun renderFrame(config: EdgeConfig, frames: Int = 30): Bitmap {
+        val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val renderer = EdgeLightRenderer()
+        renderer.updateDimensions(w.toFloat(), h.toFloat(), config)
+        var t = 1_000_000_000L
+        repeat(frames) {
+            bmp.eraseColor(Color.TRANSPARENT)
+            val canvas = Canvas(bmp)
+            canvas.drawColor(Color.rgb(28, 28, 32)) // dunkler „Display-Inhalt“
+            renderer.render(canvas, config, t)
+            t += 33_000_000L
+        }
+        return bmp
+    }
+
+    private fun save(bmp: Bitmap, name: String) {
+        val dir = File("build/snapshots").apply { mkdirs() }
+        FileOutputStream(File(dir, "$name.png")).use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
+    }
+
+    @Test
+    fun renderAllStyles() {
+        for (style in LineStyle.entries) {
+            val cfg = EdgeConfig(
+                lineStyle = style,
+                selectedPaletteId = 48,
+                animationMode = AnimationMode.ROTATE,
+                glowReach = 140f,
+                borderThickness = 10f,
+                tailLength = 0.45f
+            )
+            save(renderFrame(cfg), "style_${style.name}")
+        }
+    }
+
+    @Test
+    fun aura_fadesSoftlyIntoDisplay() {
+        val cfg = EdgeConfig(lineStyle = LineStyle.AURA, selectedPaletteId = 48, glowReach = 140f, borderThickness = 10f)
+        val bmp = renderFrame(cfg)
+        save(bmp, "aura_profile")
+        // Helligkeit entlang einer horizontalen Linie in Bildschirmmitte vom linken Rand nach innen
+        val y = h / 2
+        val lum = (0 until 200).map { x ->
+            val c = bmp.getPixel(x, y)
+            (Color.red(c) + Color.green(c) + Color.blue(c)) / 3f
+        }
+        var maxStep = 0f
+        for (x in 1 until lum.size) maxStep = maxOf(maxStep, kotlin.math.abs(lum[x] - lum[x - 1]))
+        println("AURA luminance x=0..199 step10: " + lum.filterIndexed { i, _ -> i % 10 == 0 }.map { it.toInt() })
+        println("AURA max neighbour step: $maxStep")
+        assertTrue("Rand soll deutlich heller als Inhalt sein", lum[2] > lum[190] + 40f)
+        assertTrue("Keine harte Kante (max. Sprung $maxStep)", maxStep < 18f)
+    }
+
+    @Test
+    fun opacity100_coversContent() {
+        val cfg = EdgeConfig(lineStyle = LineStyle.RING, selectedPaletteId = 48, opacityPercent = 100, borderThickness = 16f, isGlowEnabled = false)
+        val bmp = renderFrame(cfg)
+        val c = bmp.getPixel(4, h / 2)
+        println("RING opacity100 edge pixel: r=${Color.red(c)} g=${Color.green(c)} b=${Color.blue(c)}")
+        // Inhalt ist (28,28,32); voll deckender Kern muss die Palettenfarbe zeigen, nicht den Inhalt
+        assertTrue("Kern deckt nicht", Color.blue(c) > 150)
+    }
+}

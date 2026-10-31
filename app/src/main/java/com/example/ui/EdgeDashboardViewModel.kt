@@ -10,11 +10,12 @@ import com.example.model.AnimationMode
 import com.example.model.AppEdgeRule
 import com.example.model.BatterySaverConfig
 import com.example.model.BatteryStatus
-import com.example.model.BorderShapeType
 import com.example.model.ContactEdgeRule
 import com.example.model.EdgeConfig
 import com.example.model.EdgeScheduleConfig
 import com.example.model.LightProfile
+import com.example.model.LineStyle
+import com.example.model.PulseCurve
 import com.example.model.NotchConfig
 import com.example.model.NotificationEdgeSettings
 import com.example.service.CallerIdMonitorService
@@ -87,8 +88,7 @@ class EdgeDashboardViewModel(application: Application) : AndroidViewModel(applic
         paletteId: Int,
         useCustomColors: Boolean,
         customColors: List<Long>,
-        shapeType: BorderShapeType,
-        customEmoji: String,
+        lineStyle: LineStyle,
         durationSeconds: Int
     ) {
         val context = getApplication<Application>()
@@ -97,15 +97,14 @@ class EdgeDashboardViewModel(application: Application) : AndroidViewModel(applic
             paletteId = paletteId,
             useCustomColors = useCustomColors,
             customColorsCsv = customColors.joinToString(","),
-            shapeType = shapeType.name,
-            customEmoji = customEmoji,
+            lineStyle = lineStyle.name,
             durationSeconds = durationSeconds,
             wakeScreen = notificationSettings.value.wakeScreenOnNotification
         )
     }
 
-    fun updateBrightness(percent: Int) {
-        repository.updateBrightness(percent)
+    fun updateOpacity(percent: Int) {
+        repository.updateOpacity(percent)
     }
 
     fun triggerCurrentTestAlert(durationSeconds: Int = 5) {
@@ -114,8 +113,7 @@ class EdgeDashboardViewModel(application: Application) : AndroidViewModel(applic
             paletteId = current.selectedPaletteId,
             useCustomColors = current.useCustomColors,
             customColors = current.customColors,
-            shapeType = current.shapeType,
-            customEmoji = current.customEmoji,
+            lineStyle = current.lineStyle,
             durationSeconds = durationSeconds
         )
     }
@@ -128,12 +126,8 @@ class EdgeDashboardViewModel(application: Application) : AndroidViewModel(applic
         repository.updateCustomColors(colors)
     }
 
-    fun setShapeType(shape: BorderShapeType, customEmoji: String? = null) {
-        repository.updateShapeType(shape, customEmoji)
-    }
-
-    fun setShapeParameters(size: Float, spacing: Float) {
-        repository.updateShapeParameters(size, spacing)
+    fun updateLineStyle(lineStyle: LineStyle? = null, tailLength: Float? = null, glowReach: Float? = null) {
+        repository.updateLineStyle(lineStyle = lineStyle, tailLength = tailLength, glowReach = glowReach)
     }
 
     fun updateGeometry(
@@ -152,8 +146,13 @@ class EdgeDashboardViewModel(application: Application) : AndroidViewModel(applic
         )
     }
 
-    fun updateMotion(animationMode: AnimationMode? = null, pulseSpeed: Float? = null) {
-        repository.updateMotion(animationMode = animationMode, pulseSpeed = pulseSpeed)
+    fun updateMotion(
+        animationMode: AnimationMode? = null,
+        pulseSpeed: Float? = null,
+        pulseCurve: PulseCurve? = null,
+        pulseStrength: Float? = null
+    ) {
+        repository.updateMotion(animationMode, pulseSpeed, pulseCurve, pulseStrength)
     }
 
     fun applyLightProfile(profile: LightProfile) {

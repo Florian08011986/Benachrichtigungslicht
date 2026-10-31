@@ -1,132 +1,101 @@
 package com.example.rendering
 
-import android.graphics.BlurMaskFilter
 import android.graphics.Canvas
 import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.PathMeasure
-import android.graphics.Rect
+import android.graphics.RectF
 import android.graphics.SweepGradient
 import com.example.model.AnimationMode
-import com.example.model.BorderShapeType
 import com.example.model.EdgeColorPalette
 import com.example.model.EdgeConfig
+import com.example.model.LineStyle
 import com.example.model.NotchType
+import com.example.model.PulseCurve
 import kotlin.math.PI
 import kotlin.math.atan2
-import kotlin.math.cos
+import kotlin.math.floor
 import kotlin.math.min
 import kotlin.math.sin
 
+/**
+ * Zeichnet die Randbeleuchtung – ausschließlich linienförmige Stile entlang des Rands.
+ *
+ * - Weicher Schein/Aura: nicht überlappende, abgerundete Ringe mit vorberechnetem Helligkeitsprofil
+ *   (kein BlurMaskFilter: laut Android-Doku wird setMaskFilter() mit Hardware-Beschleunigung nicht unterstützt).
+ * - Komet/Lauflicht: Farbverlauf (SweepGradient) mit Alpha-Maske, pro Frame über eine
+ *   Bogenlänge→Winkel-Tabelle erzeugt → gleichmäßiges Tempo an allen Kanten, keine Segmente.
+ */
 class EdgeLightRenderer {
 
     private var width: Float = 0f
     private var height: Float = 0f
+    private var cx: Float = 0f
+    private var cy: Float = 0f
 
-    // Reusable Paths
+    // Geometrie
     private val borderPath = Path()
     private val cutoutPath = Path()
     private val combinedPath = Path()
     private val pathMeasure = PathMeasure()
+    private var perimeter: Float = 0f
+    private var cornerTop: Float = 0f
+    private var cornerBottom: Float = 0f
 
-    // Shape template paths (normalized around origin 0,0)
-    private val heartTemplatePath = Path()
-    private val starTemplatePath = Path()
-    private val diamondTemplatePath = Path()
-    private val sunTemplatePath = Path()
-    private val transformedShapePath = Path()
+    // Bogenlänge → Winkel (Grad, monoton steigend)
+    private val angleLut = FloatArray(LUT_SIZE + 1)
+    private val pos = FloatArray(2)
+
+    // Weiche Ringe (Cache je Reichweite/Schichtzahl)
+    private var ringPaths: Array<Path> = emptyArray()
+    private var ringProfile: FloatArray = FloatArray(0)
+    private var ringDepth: FloatArray = FloatArray(0)
+    private var ringWidths: FloatArray = FloatArray(0)
+    private var ringKeyReach: Float = -1f
+    private var ringKeyLayers: Int = -1
+    private var ringKeyPeak: Float = -1f
+    private val rectF = RectF()
+    private val radii = FloatArray(8)
 
     // Paints
-    private val strokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    private val linePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         strokeCap = Paint.Cap.ROUND
         strokeJoin = Paint.Join.ROUND
     }
-
-    private val glowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    private val ringPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
-        strokeCap = Paint.Cap.ROUND
         strokeJoin = Paint.Join.ROUND
     }
 
-    private val shapePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.FILL_AND_STROKE
-        strokeCap = Paint.Cap.ROUND
-        strokeJoin = Paint.Join.ROUND
-    }
-
-    private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        textAlign = Paint.Align.CENTER
-    }
-
-    // Gradient & Transform
-    private var sweepGradient: SweepGradient? = null
-    private val matrix = Matrix()
-    private val shapeMatrix = Matrix()
-    private val pos = FloatArray(2)
-    private val tan = FloatArray(2)
-    private val textBounds = Rect()
-
-    // Animation State
-    private var currentRotationAngle: Float = 0f
-    private var lastRenderTimeNanos: Long = 0L
-    private var pulsePhase: Float = 0f          // 0..1 (ein voller Atemzyklus)
-    private var pulseLevel: Float = 1f          // 0..1, aktueller Puls-Pegel (1 = voll)
-    private var cachedBlurRadius: Float = -1f
-
-    // Cached configuration to detect changes
+    // Farben
+    private var paletteColors: IntArray = intArrayOf()
+    private var ringSweep: SweepGradient? = null
+    private val gradientMatrix = Matrix()
     private var cachedPaletteId: Int = -1
     private var cachedUseCustomColors: Boolean = false
     private var cachedCustomColors: List<Long> = emptyList()
-    private var cachedColorsArray: IntArray = intArrayOf()
 
-    init {
-        initVectorTemplates()
-    }
+    // Masken-Arrays (wiederverwendet)
+    private val maskColors = IntArray(MAX_STOPS)
+    private val maskPositions = FloatArray(MAX_STOPS)
 
-    private fun initVectorTemplates() {
-        // Heart template (unit size ~ 1.0)
-        heartTemplatePath.reset()
-        heartTemplatePath.moveTo(0f, 0.35f)
-        heartTemplatePath.cubicTo(-0.6f, -0.3f, -1.0f, 0.4f, 0f, 1.0f)
-        heartTemplatePath.cubicTo(1.0f, 0.4f, 0.6f, -0.3f, 0f, 0.35f)
-        heartTemplatePath.close()
+    // Animationszustand
+    private var travel: Float = 0f          // 0..1 Position entlang des Umfangs
+    private var pulsePhase: Float = 0f      // 0..1
+    private var lastRenderTimeNanos: Long = 0L
 
-        // 5-Pointed Star template
-        starTemplatePath.reset()
-        val numPoints = 5
-        val outerRadius = 1.0f
-        val innerRadius = 0.45f
-        for (i in 0 until numPoints * 2) {
-            val r = if (i % 2 == 0) outerRadius else innerRadius
-            val angle = (i * PI / numPoints) - (PI / 2)
-            val x = (r * cos(angle)).toFloat()
-            val y = (r * sin(angle)).toFloat()
-            if (i == 0) starTemplatePath.moveTo(x, y) else starTemplatePath.lineTo(x, y)
-        }
-        starTemplatePath.close()
-
-        // Diamond template
-        diamondTemplatePath.reset()
-        diamondTemplatePath.moveTo(0f, -1.0f)
-        diamondTemplatePath.lineTo(0.75f, 0f)
-        diamondTemplatePath.lineTo(0f, 1.0f)
-        diamondTemplatePath.lineTo(-0.75f, 0f)
-        diamondTemplatePath.close()
-
-        // Sun template
-        sunTemplatePath.reset()
-        sunTemplatePath.addCircle(0f, 0f, 0.55f, Path.Direction.CW)
-        for (i in 0 until 8) {
-            val angle = (i * PI / 4.0)
-            val x1 = (0.65f * cos(angle)).toFloat()
-            val y1 = (0.65f * sin(angle)).toFloat()
-            val x2 = (1.0f * cos(angle)).toFloat()
-            val y2 = (1.0f * sin(angle)).toFloat()
-            sunTemplatePath.moveTo(x1, y1)
-            sunTemplatePath.lineTo(x2, y2)
-        }
+    companion object {
+        private const val LUT_SIZE = 720
+        private const val AURA_LAYERS = 32
+        private const val LITE_LAYERS = 12
+        private const val GLOW_LAYERS = 20
+        private const val COMET_STOPS = 18
+        private const val RUNNING_COUNT = 10
+        private const val RUNNING_STOPS = 7
+        private const val MAX_STOPS = 96
+        private const val CALLER_PULSE_HZ = 1.4f
     }
 
     fun updateDimensions(newWidth: Float, newHeight: Float, config: EdgeConfig) {
@@ -134,50 +103,54 @@ class EdgeLightRenderer {
         val sizeChanged = (width != newWidth || height != newHeight)
         width = newWidth
         height = newHeight
-
-        if (sizeChanged) {
-            invalidateShader(config)
-        }
+        cx = width / 2f
+        cy = height / 2f
+        if (sizeChanged) invalidateColors(config)
         buildBorderPaths(config)
     }
 
-    private fun invalidateShader(config: EdgeConfig) {
-        val rawColors: List<Long> = if (config.useCustomColors) {
+    private fun invalidateColors(config: EdgeConfig) {
+        val raw: List<Long> = if (config.useCustomColors) {
             config.customColors.ifEmpty { listOf(0xFF00E5FFL, 0xFFD500F9L) }
         } else {
             EdgeColorPalette.getPreset(config.selectedPaletteId).colors
         }
-
-        // Ensure closed loop for seamless 360-degree sweep gradient
-        val closedList = if (rawColors.first() != rawColors.last()) {
-            rawColors + rawColors.first()
-        } else {
-            rawColors
-        }
-
-        cachedColorsArray = closedList.map { it.toInt() }.toIntArray()
+        val closed = if (raw.first() != raw.last()) raw + raw.first() else raw
+        paletteColors = closed.map { it.toInt() }.toIntArray()
         cachedPaletteId = config.selectedPaletteId
         cachedUseCustomColors = config.useCustomColors
         cachedCustomColors = config.customColors
-
         if (width > 0f && height > 0f) {
-            sweepGradient = SweepGradient(width / 2f, height / 2f, cachedColorsArray, null)
-            strokePaint.shader = sweepGradient
-            glowPaint.shader = sweepGradient
-            shapePaint.shader = sweepGradient
+            ringSweep = SweepGradient(cx, cy, paletteColors, null)
         }
     }
 
-    private fun checkShaderUpdate(config: EdgeConfig) {
-        val colorsDiffer = (config.selectedPaletteId != cachedPaletteId) ||
-                (config.useCustomColors != cachedUseCustomColors) ||
+    private fun checkColorUpdate(config: EdgeConfig) {
+        val differ = config.selectedPaletteId != cachedPaletteId ||
+                config.useCustomColors != cachedUseCustomColors ||
                 (config.useCustomColors && config.customColors != cachedCustomColors) ||
-                sweepGradient == null
-
-        if (colorsDiffer) {
-            invalidateShader(config)
-        }
+                ringSweep == null
+        if (differ) invalidateColors(config)
     }
+
+    /** Palettenfarbe an Position u (0..1) im geschlossenen Verlauf, linear interpoliert. */
+    private fun paletteAt(u: Float): Int {
+        val c = paletteColors
+        if (c.isEmpty()) return 0xFF00E5FF.toInt()
+        if (c.size == 1) return c[0]
+        val x = (((u % 1f) + 1f) % 1f) * (c.size - 1)
+        val i = floor(x).toInt().coerceIn(0, c.size - 2)
+        val f = x - i
+        return lerpColor(c[i], c[i + 1], f)
+    }
+
+    private fun lerpColor(a: Int, b: Int, f: Float): Int {
+        fun ch(shift: Int) = (((a shr shift) and 0xFF) + (((b shr shift) and 0xFF) - ((a shr shift) and 0xFF)) * f).toInt()
+        return (0xFF shl 24) or (ch(16) shl 16) or (ch(8) shl 8) or ch(0)
+    }
+
+    private fun withAlpha(color: Int, alpha01: Float): Int =
+        ((alpha01.coerceIn(0f, 1f) * 255f).toInt() shl 24) or (color and 0x00FFFFFF)
 
     fun buildBorderPaths(config: EdgeConfig) {
         if (width <= 0f || height <= 0f) return
@@ -308,6 +281,68 @@ class EdgeLightRenderer {
         if (!cutoutPath.isEmpty) {
             combinedPath.addPath(cutoutPath)
         }
+
+        cornerTop = rTop + inset
+        cornerBottom = rBottom + inset
+        buildAngleLut()
+    }
+
+    /** Bogenlänge→Winkel-Tabelle; Winkel werden „entfaltet“, damit sie entlang des Umlaufs monoton steigen. */
+    private fun buildAngleLut() {
+        pathMeasure.setPath(borderPath, false)
+        perimeter = pathMeasure.length
+        if (perimeter <= 0f) return
+        var prev = 0f
+        var offset = 0f
+        for (i in 0..LUT_SIZE) {
+            pathMeasure.getPosTan(perimeter * i / LUT_SIZE, pos, null)
+            var a = Math.toDegrees(atan2((pos[1] - cy).toDouble(), (pos[0] - cx).toDouble())).toFloat()
+            if (i > 0) {
+                a += offset
+                while (a < prev - 180f) { a += 360f; offset += 360f }
+                while (a > prev + 180f) { a -= 360f; offset -= 360f }
+            }
+            angleLut[i] = a
+            prev = a
+        }
+        ringKeyReach = -1f // Ringe passend zur neuen Geometrie neu bauen
+    }
+
+    /** Winkel (Grad) zur Bogenlänge s, auch außerhalb 0..Umfang (ganze Umläufe = ±360°). */
+    private fun angleAt(s: Float): Float {
+        val p = perimeter
+        val loops = floor(s / p)
+        val local = s - loops * p
+        val x = local / p * LUT_SIZE
+        val i = x.toInt().coerceIn(0, LUT_SIZE - 1)
+        val f = x - i
+        return angleLut[i] + (angleLut[i + 1] - angleLut[i]) * f + loops * (angleLut[LUT_SIZE] - angleLut[0])
+    }
+
+    /**
+     * Verschachtelte Lichtschichten: Schicht k reicht vom Rand bis Tiefe d_k = k/n · Reichweite.
+     * Nur ihre Innenkante liegt im Bild und ist abgerundet (Radius wächst mit der Tiefe) → keine Nähte,
+     * keine diagonalen Ecken. Deckkraft je Schicht aus [PulseMath.glowLayerAlphas] → Profil peak · (1 − d)².
+     */
+    private fun ensureRings(reach: Float, layers: Int, peak: Float) {
+        if (reach == ringKeyReach && layers == ringKeyLayers && peak == ringKeyPeak && ringPaths.size == layers) return
+        ringKeyReach = reach
+        ringKeyLayers = layers
+        ringKeyPeak = peak
+        ringProfile = PulseMath.glowLayerAlphas(layers, peak)
+        ringDepth = FloatArray(layers) { k -> (k + 1f) / layers }
+        ringWidths = FloatArray(layers) { k -> ringDepth[k] * reach }
+        ringPaths = Array(layers) { k ->
+            val d = ringWidths[k]
+            val half = d / 2f
+            val maxR = (min(width, height) / 2f - half).coerceAtLeast(0f)
+            val rt = (cornerTop + d * 0.6f + half).coerceIn(0f, maxR)
+            val rb = (cornerBottom + d * 0.6f + half).coerceIn(0f, maxR)
+            radii[0] = rt; radii[1] = rt; radii[2] = rt; radii[3] = rt
+            radii[4] = rb; radii[5] = rb; radii[6] = rb; radii[7] = rb
+            rectF.set(half, half, width - half, height - half)
+            Path().apply { addRoundRect(rectF, radii, Path.Direction.CW) }
+        }
     }
 
     fun render(
@@ -318,205 +353,155 @@ class EdgeLightRenderer {
         disableGlow: Boolean = false
     ) {
         if (width <= 0f || height <= 0f) return
+        checkColorUpdate(config)
+        if (perimeter <= 0f) buildAngleLut()
+        if (perimeter <= 0f) return
 
-        checkShaderUpdate(config)
-
-        // Calculate time delta for smooth motion
-        if (lastRenderTimeNanos == 0L) {
-            lastRenderTimeNanos = nowNanos
-        }
-        val deltaSeconds = ((nowNanos - lastRenderTimeNanos) / 1_000_000_000f).coerceIn(0.001f, 0.1f)
+        // Zeitschritt (auf 50 ms begrenzt → kein Sprung nach Pausen)
+        if (lastRenderTimeNanos == 0L) lastRenderTimeNanos = nowNanos
+        val dt = ((nowNanos - lastRenderTimeNanos) / 1_000_000_000f).coerceIn(0f, 0.05f)
         lastRenderTimeNanos = nowNanos
 
-        val rotates = config.animationMode != AnimationMode.PULSE
-        val pulses = config.animationMode != AnimationMode.ROTATE
+        val alert = config.isCallerAlertActive
+        val moves = config.animationMode != AnimationMode.PULSE || alert
+        val pulses = config.animationMode != AnimationMode.ROTATE || alert
 
-        // Caller alert boosts speed and intensity
-        if (rotates) {
-            val speedMultiplier = if (config.isCallerAlertActive) config.animationSpeed * 2.5f else config.animationSpeed
-            val degreesPerSecond = 36f * speedMultiplier
-            currentRotationAngle = (currentRotationAngle + degreesPerSecond * deltaSeconds) % 360f
+        // Bewegung: 1x = eine Runde in 10 s
+        if (moves) {
+            val speed = if (alert) config.animationSpeed * 2.5f else config.animationSpeed
+            travel = (travel + 0.1f * speed.coerceIn(0.05f, 40f) * dt) % 1f
         }
 
-        // Atmendes Pulsieren: weicher Kosinus-Verlauf 0 → 1 → 0
-        pulseLevel = if (pulses) {
-            pulsePhase = (pulsePhase + config.pulseSpeed.coerceIn(0.05f, 4f) * deltaSeconds) % 1f
-            (0.5f - 0.5f * cos(2.0 * PI * pulsePhase)).toFloat()
-        } else {
-            1f
-        }
+        // Puls
+        val intensity = if (pulses) {
+            val curve = if (alert) PulseCurve.SINE else config.pulseCurve
+            val hz = if (alert) CALLER_PULSE_HZ else config.pulseSpeed.coerceIn(0.05f, 4f)
+            pulsePhase = (pulsePhase + hz * dt) % 1f
+            PulseMath.intensity(curve, PulseMath.level(curve, pulsePhase), if (alert) 0.5f else config.pulseStrength)
+        } else 1f
 
-        // Rotate sweep gradient
-        matrix.reset()
-        matrix.setRotate(currentRotationAngle, width / 2f, height / 2f)
-        sweepGradient?.setLocalMatrix(matrix)
+        val opacity = config.opacityPercent.coerceIn(10, 100) / 100f
+        val baseAlpha = 255f * opacity * batteryDimMultiplier.coerceIn(0.1f, 1f)
+        val glowOn = config.isGlowEnabled && !disableGlow
+        val thickness = if (alert) config.borderThickness * 1.3f else config.borderThickness
+        val reach = config.glowReach.coerceIn(10f, 600f)
 
-        // Base alpha calculation modulated by user brightness setting
-        val userBrightness = (config.brightnessPercent.coerceIn(10, 100) / 100f)
-        val baseAlpha = if (config.isCallerAlertActive) {
-            (180 + (75 * sin(nowNanos / 100_000_000.0)).toInt()).coerceIn(120, 255)
-        } else {
-            255
-        }
-        // Puls moduliert die Deckkraft zwischen 25 % und 100 %
-        val pulseAlphaFactor = 0.25f + 0.75f * pulseLevel
-        val alertAlpha = (baseAlpha * userBrightness * batteryDimMultiplier.coerceIn(0.1f, 1.0f) * pulseAlphaFactor)
-            .toInt().coerceIn(15, 255)
-
-        if (config.shapeType == BorderShapeType.CONTINUOUS_LINE) {
-            renderContinuousLine(canvas, config, alertAlpha, disableGlow, pulses)
-        } else {
-            renderBorderShapes(canvas, config, alertAlpha)
-        }
-    }
-
-    private fun applyGlowBlur(radius: Float) {
-        // BlurMaskFilter nur bei spürbarer Radiusänderung neu erzeugen (spart Allokationen pro Frame)
-        if (kotlin.math.abs(radius - cachedBlurRadius) < 0.75f) return
-        cachedBlurRadius = radius
-        glowPaint.maskFilter = try {
-            BlurMaskFilter(radius.coerceAtLeast(1f), BlurMaskFilter.Blur.NORMAL)
-        } catch (_: Exception) {
-            null // Hardware acceleration fallback
-        }
-    }
-
-    private fun renderContinuousLine(
-        canvas: Canvas,
-        config: EdgeConfig,
-        alpha: Int,
-        disableGlow: Boolean = false,
-        pulses: Boolean = false
-    ) {
-        val thickness = if (config.isCallerAlertActive) config.borderThickness * 1.3f else config.borderThickness
-
-        // Optional outer neon glow effect (suppressed in battery saving mode)
-        if (config.isGlowEnabled && !disableGlow) {
-            if (pulses) {
-                // Pulsieren: Aura atmet nach innen auf (Breite 1.8x → 4.5x, Unschärfe wächst mit)
-                val glowWidth = thickness * (1.8f + 2.7f * pulseLevel)
-                glowPaint.strokeWidth = glowWidth
-                glowPaint.alpha = (alpha * (0.35f + 0.35f * pulseLevel)).toInt().coerceIn(0, 255)
-                applyGlowBlur(glowWidth * 0.3f)
-            } else {
-                glowPaint.strokeWidth = thickness * 1.8f
-                glowPaint.alpha = (alpha * 0.45f).toInt()
-                applyGlowBlur(thickness * 0.45f)
+        // Farb-/Maskenverlauf für diesen Frame wählen
+        val shader: SweepGradient = when (config.lineStyle) {
+            LineStyle.RING, LineStyle.AURA -> {
+                gradientMatrix.setRotate(travel * 360f, cx, cy)
+                ringSweep?.setLocalMatrix(gradientMatrix)
+                ringSweep ?: return
             }
-            canvas.drawPath(combinedPath, glowPaint)
+            LineStyle.COMET -> cometShader(travel, config.tailLength, 1)
+            LineStyle.DUAL_COMET -> cometShader(travel, config.tailLength.coerceAtMost(0.45f), 2)
+            LineStyle.RUNNING_LIGHTS -> runningShader(travel)
         }
+        linePaint.shader = shader
+        ringPaint.shader = shader
 
-        // Core sharp beam
-        strokePaint.strokeWidth = thickness
-        strokePaint.alpha = alpha
-        strokePaint.maskFilter = null
-        canvas.drawPath(combinedPath, strokePaint)
-    }
-
-    private fun renderBorderShapes(canvas: Canvas, config: EdgeConfig, alpha: Int) {
-        val size = if (config.isCallerAlertActive) config.shapeSize * 1.25f else config.shapeSize
-        val spacing = config.shapeSpacing.coerceAtLeast(10f)
-        val stepDistance = size + spacing
-
-        pathMeasure.setPath(borderPath, false)
-        val pathLength = pathMeasure.length
-        if (pathLength <= 0f) return
-
-        val count = (pathLength / stepDistance).toInt()
-        if (count <= 0) return
-
-        // Dynamic moving phase offset
-        val phaseOffset = (currentRotationAngle / 360f) * pathLength
-
-        shapePaint.alpha = alpha
-        textPaint.textSize = size
-        textPaint.alpha = alpha
-
-        for (i in 0 until count) {
-            val dist = (i * stepDistance + phaseOffset) % pathLength
-            pathMeasure.getPosTan(dist, pos, tan)
-
-            val px = pos[0]
-            val py = pos[1]
-            val angleRad = atan2(tan[1].toDouble(), tan[0].toDouble())
-            val angleDeg = Math.toDegrees(angleRad).toFloat()
-
-            when (config.shapeType) {
-                BorderShapeType.CONTINUOUS_LINE -> { /* Handled separately */ }
-
-                BorderShapeType.HEART -> {
-                    drawScaledVector(canvas, heartTemplatePath, px, py, size / 2f, angleDeg)
-                }
-                BorderShapeType.STAR -> {
-                    drawScaledVector(canvas, starTemplatePath, px, py, size / 2f, angleDeg)
-                }
-                BorderShapeType.DIAMOND -> {
-                    drawScaledVector(canvas, diamondTemplatePath, px, py, size / 2f, angleDeg)
-                }
-                BorderShapeType.SUN -> {
-                    drawScaledVector(canvas, sunTemplatePath, px, py, size / 2f, angleDeg)
-                }
-                BorderShapeType.EMOJI_COOL -> {
-                    drawEmojiAt(canvas, "😎", px, py, angleDeg)
-                }
-                BorderShapeType.EMOJI_SLEEP -> {
-                    drawEmojiAt(canvas, "💤", px, py, angleDeg)
-                }
-                BorderShapeType.CUSTOM_EMOJI -> {
-                    val emoji = config.customEmoji.ifBlank { "✨" }
-                    drawEmojiAt(canvas, emoji, px, py, angleDeg)
-                }
+        when (config.lineStyle) {
+            LineStyle.AURA -> {
+                drawRings(canvas, reach, if (disableGlow) LITE_LAYERS else AURA_LAYERS, 0.92f, baseAlpha, intensity)
+                // hauchdünne Kante – definiert den Rand, ohne harte Kontur
+                drawLine(canvas, borderPath, thickness * 0.35f, baseAlpha * intensity * 0.55f)
             }
-        }
-
-        // If punch hole cutout is present, draw shapes or stroke around it as well
-        if (!cutoutPath.isEmpty) {
-            pathMeasure.setPath(cutoutPath, false)
-            val cutLength = pathMeasure.length
-            if (cutLength > 0f) {
-                val cutCount = (cutLength / stepDistance).toInt().coerceAtLeast(1)
-                for (j in 0 until cutCount) {
-                    val dist = (j * stepDistance + phaseOffset) % cutLength
-                    pathMeasure.getPosTan(dist, pos, tan)
-                    val px = pos[0]
-                    val py = pos[1]
-                    val angleDeg = Math.toDegrees(atan2(tan[1].toDouble(), tan[0].toDouble())).toFloat()
-
-                    when (config.shapeType) {
-                        BorderShapeType.HEART -> drawScaledVector(canvas, heartTemplatePath, px, py, size * 0.4f, angleDeg)
-                        BorderShapeType.STAR -> drawScaledVector(canvas, starTemplatePath, px, py, size * 0.4f, angleDeg)
-                        BorderShapeType.DIAMOND -> drawScaledVector(canvas, diamondTemplatePath, px, py, size * 0.4f, angleDeg)
-                        BorderShapeType.SUN -> drawScaledVector(canvas, sunTemplatePath, px, py, size * 0.4f, angleDeg)
-                        BorderShapeType.EMOJI_COOL -> drawEmojiAt(canvas, "😎", px, py, angleDeg, scale = 0.8f)
-                        BorderShapeType.EMOJI_SLEEP -> drawEmojiAt(canvas, "💤", px, py, angleDeg, scale = 0.8f)
-                        BorderShapeType.CUSTOM_EMOJI -> drawEmojiAt(canvas, config.customEmoji.ifBlank { "✨" }, px, py, angleDeg, scale = 0.8f)
-                        else -> {}
-                    }
-                }
+            else -> {
+                // Maskierte Stile (Komet/Lauflicht): Schein flach halten, sonst entstehen Lichtkegel zur Bildmitte
+                val masked = config.lineStyle != LineStyle.RING
+                val glowReach = if (masked) min(reach * 0.35f, 48f).coerceAtLeast(thickness * 1.5f) else reach
+                if (glowOn) drawRings(canvas, glowReach, GLOW_LAYERS, if (masked) 0.75f else 0.6f, baseAlpha, intensity)
+                val path = if (config.lineStyle == LineStyle.RING) combinedPath else borderPath
+                drawLine(canvas, path, thickness, baseAlpha * intensity)
             }
         }
     }
 
-    private fun drawScaledVector(canvas: Canvas, template: Path, cx: Float, cy: Float, radius: Float, angleDeg: Float) {
-        transformedShapePath.reset()
-        shapeMatrix.reset()
-        shapeMatrix.postScale(radius, radius)
-        shapeMatrix.postRotate(angleDeg + 90f) // Orient upright relative to perimeter tangent
-        shapeMatrix.postTranslate(cx, cy)
-        template.transform(shapeMatrix, transformedShapePath)
-        canvas.drawPath(transformedShapePath, shapePaint)
+    private fun drawLine(canvas: Canvas, path: Path, strokeWidth: Float, alpha: Float) {
+        linePaint.strokeWidth = strokeWidth.coerceAtLeast(1f)
+        linePaint.alpha = alpha.toInt().coerceIn(0, 255)
+        canvas.drawPath(path, linePaint)
     }
 
-    private fun drawEmojiAt(canvas: Canvas, emoji: String, cx: Float, cy: Float, angleDeg: Float, scale: Float = 1.0f) {
-        canvas.save()
-        canvas.translate(cx, cy)
-        canvas.rotate(angleDeg + 90f)
-        if (scale != 1.0f) {
-            canvas.scale(scale, scale)
+    /** Weicher Schein; beim Pulsieren tauchen tiefe Ringe stärker ab → das Licht „atmet“ ins Display. */
+    private fun drawRings(canvas: Canvas, reach: Float, layers: Int, peak: Float, baseAlpha: Float, intensity: Float) {
+        ensureRings(reach, layers, peak)
+        for (k in ringPaths.indices.reversed()) { // tiefste (breiteste) Schicht zuerst
+            val breath = (1f - (1f - intensity) * (0.25f + 0.75f * ringDepth[k])).coerceIn(0f, 1f)
+            val a = (baseAlpha * ringProfile[k] * breath).toInt().coerceIn(0, 255)
+            if (a == 0) continue
+            ringPaint.alpha = a
+            ringPaint.strokeWidth = ringWidths[k]
+            canvas.drawPath(ringPaths[k], ringPaint)
         }
-        textPaint.getTextBounds(emoji, 0, emoji.length, textBounds)
-        val yOffset = textBounds.height() / 2f
-        canvas.drawText(emoji, 0f, yOffset, textPaint)
-        canvas.restore()
+    }
+
+    /**
+     * Komet(en) als Alpha-Maske im Farbverlauf. Stützstellen werden in Bogenlänge verteilt und über die
+     * Winkel-Tabelle umgerechnet → Schweiflänge und Tempo sind an allen Kanten gleich.
+     */
+    private fun cometShader(headFraction: Float, tailFraction: Float, count: Int): SweepGradient {
+        val p = perimeter
+        val tail = tailFraction.coerceIn(0.05f, 0.9f) * p
+        val lead = tail * 0.04f // weicher Kopf statt harter Abbruchkante
+        val spacing = p / count
+        val firstStart = headFraction * p - tail
+        val base = angleAt(firstStart)
+        var n = 0
+        for (c in 0 until count) {
+            val start = firstStart + c * spacing
+            for (i in 0..COMET_STOPS) {
+                val u = i.toFloat() / COMET_STOPS                      // 0 = Schweifende, 1 = Kopf
+                val s = start + u * tail
+                maskPositions[n] = ((angleAt(s) - base) / 360f).coerceIn(0f, 1f)
+                maskColors[n] = withAlpha(paletteAt(s / p), u * kotlin.math.sqrt(u)) // u^1,5 → langer, sichtbarer Schweif
+                n++
+            }
+            val sLead = start + tail + lead
+            maskPositions[n] = ((angleAt(sLead) - base) / 360f).coerceIn(0f, 1f)
+            maskColors[n] = withAlpha(paletteAt(sLead / p), 0f)
+            n++
+        }
+        return finishMask(n, base)
+    }
+
+    /** Lauflicht: weich ein- und ausblendende Lichtstriche, gleichmäßig über den Umfang verteilt. */
+    private fun runningShader(headFraction: Float): SweepGradient {
+        val p = perimeter
+        val unit = p / RUNNING_COUNT
+        val dash = unit * 0.5f
+        val firstStart = headFraction * p
+        val base = angleAt(firstStart)
+        var n = 0
+        for (c in 0 until RUNNING_COUNT) {
+            val start = firstStart + c * unit
+            for (i in 0..RUNNING_STOPS) {
+                val u = i.toFloat() / RUNNING_STOPS
+                val s = start + u * dash
+                val bump = sin(PI * u).toFloat()
+                maskPositions[n] = ((angleAt(s) - base) / 360f).coerceIn(0f, 1f)
+                maskColors[n] = withAlpha(paletteAt(s / p), bump * bump)
+                n++
+            }
+        }
+        return finishMask(n, base)
+    }
+
+    /** Schließt die Maske transparent bis 360° ab und dreht sie an die Basis-Position. */
+    private fun finishMask(count: Int, baseAngle: Float): SweepGradient {
+        var n = count
+        // Positionen strikt monoton halten (Gleichstände sind erlaubt)
+        for (i in 1 until n) if (maskPositions[i] < maskPositions[i - 1]) maskPositions[i] = maskPositions[i - 1]
+        if (n < MAX_STOPS) {
+            maskPositions[n] = 1f
+            maskColors[n] = maskColors[n - 1] and 0x00FFFFFF
+            n++
+        }
+        val colors = maskColors.copyOf(n)
+        val positions = maskPositions.copyOf(n)
+        val sg = SweepGradient(cx, cy, colors, positions)
+        gradientMatrix.setRotate(baseAngle, cx, cy)
+        sg.setLocalMatrix(gradientMatrix)
+        return sg
     }
 }

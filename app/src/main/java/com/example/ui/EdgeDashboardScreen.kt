@@ -96,7 +96,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.example.model.AppEdgeRule
-import com.example.model.BorderShapeType
+import com.example.model.LineStyle
+import com.example.model.PulseCurve
 import com.example.model.ContactEdgeRule
 import com.example.model.EdgeColorPalette
 import com.example.model.NotchType
@@ -348,7 +349,7 @@ fun EdgeDashboardScreen(
                     Tab(
                         selected = selectedTab == 1,
                         onClick = { selectedTab = 1 },
-                        text = { Text("2. Formen") },
+                        text = { Text("2. Stil & Bewegung") },
                         icon = { Icon(Icons.Default.ShapeLine, contentDescription = "Formen") }
                     )
                     Tab(
@@ -476,7 +477,7 @@ fun EdgeDashboardScreen(
                 }
             }
 
-            // TAB 1: RANDFORMEN
+            // TAB 1: LINIENSTIL & BEWEGUNG
             if (selectedTab == 1) {
                 item {
                     Card(
@@ -487,112 +488,247 @@ fun EdgeDashboardScreen(
                     ) {
                         Column(modifier = Modifier.padding(16.dp)) {
                             Text(
-                                text = "Randform auswählen",
+                                text = "Linienstil",
                                 color = TextPrimary,
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold
                             )
+                            Text(
+                                text = "Alle Stile laufen am Bildschirmrand entlang.",
+                                color = TextMuted,
+                                style = MaterialTheme.typography.labelSmall
+                            )
+                            Spacer(modifier = Modifier.height(10.dp))
 
-                            Spacer(modifier = Modifier.height(12.dp))
-
-                            FlowRow(
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalArrangement = Arrangement.spacedBy(8.dp),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                BorderShapeType.values().forEach { shape ->
-                                    val isSelected = config.shapeType == shape
-                                    FilterChip(
-                                        selected = isSelected,
-                                        onClick = { viewModel.setShapeType(shape) },
-                                        label = {
-                                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                                Text(text = shape.iconLabel, fontSize = 16.sp)
-                                                Spacer(modifier = Modifier.width(6.dp))
-                                                Text(text = shape.displayName)
-                                            }
-                                        },
-                                        colors = FilterChipDefaults.filterChipColors(
-                                            selectedContainerColor = NeonCyan.copy(alpha = 0.2f),
-                                            selectedLabelColor = NeonCyan,
-                                            containerColor = DarkSurfaceVariant,
-                                            labelColor = TextSecondary
-                                        ),
-                                        border = FilterChipDefaults.filterChipBorder(
-                                            borderColor = if (isSelected) NeonCyan else DarkBorder,
-                                            enabled = true,
-                                            selected = isSelected
+                            LineStyle.entries.forEach { style ->
+                                val isSelected = config.lineStyle == style
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 3.dp)
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(if (isSelected) NeonCyan.copy(alpha = 0.12f) else DarkSurfaceVariant)
+                                        .border(1.dp, if (isSelected) NeonCyan else DarkBorder, RoundedCornerShape(12.dp))
+                                        .clickable { viewModel.updateLineStyle(lineStyle = style) }
+                                        .padding(horizontal = 12.dp, vertical = 10.dp)
+                                        .testTag("line_style_${style.name}"),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = style.displayName,
+                                            color = if (isSelected) NeonCyan else TextPrimary,
+                                            fontWeight = FontWeight.SemiBold
                                         )
-                                    )
-                                }
-                            }
-
-                            AnimatedVisibility(visible = config.shapeType == BorderShapeType.CUSTOM_EMOJI) {
-                                Column(modifier = Modifier.padding(top = 16.dp)) {
-                                    Text(
-                                        text = "Eigenes Emoji / Symbol eingeben",
-                                        color = TextSecondary,
-                                        style = MaterialTheme.typography.labelMedium
-                                    )
-                                    Spacer(modifier = Modifier.height(6.dp))
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
-                                        OutlinedTextField(
-                                            value = config.customEmoji,
-                                            onValueChange = {
-                                                if (it.length <= 4) viewModel.setShapeType(BorderShapeType.CUSTOM_EMOJI, it)
-                                            },
-                                            modifier = Modifier.width(100.dp),
-                                            singleLine = true
+                                        Text(
+                                            text = style.description,
+                                            color = TextSecondary,
+                                            style = MaterialTheme.typography.bodySmall
                                         )
-                                        listOf("⚡", "🔥", "🚀", "🌸", "🦋", "💀", "👾", "✨").forEach { quickEmoji ->
-                                            Box(
-                                                modifier = Modifier
-                                                    .size(36.dp)
-                                                    .clip(CircleShape)
-                                                    .background(DarkSurfaceVariant)
-                                                    .clickable {
-                                                        viewModel.setShapeType(BorderShapeType.CUSTOM_EMOJI, quickEmoji)
-                                                    },
-                                                contentAlignment = Alignment.Center
-                                            ) {
-                                                Text(quickEmoji, fontSize = 18.sp)
-                                            }
-                                        }
+                                    }
+                                    if (isSelected) {
+                                        Icon(Icons.Default.CheckCircle, contentDescription = "Aktiv", tint = NeonCyan)
                                     }
                                 }
                             }
 
-                            Spacer(modifier = Modifier.height(20.dp))
-
-                            Text(
-                                text = "Formengröße: ${config.shapeSize.toInt()} px",
-                                color = TextPrimary,
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                            Slider(
-                                value = config.shapeSize,
-                                onValueChange = { viewModel.setShapeParameters(it, config.shapeSpacing) },
-                                valueRange = 16f..72f,
-                                colors = SliderDefaults.colors(thumbColor = NeonCyan, activeTrackColor = NeonCyan)
-                            )
+                            AnimatedVisibility(
+                                visible = config.lineStyle == LineStyle.COMET || config.lineStyle == LineStyle.DUAL_COMET
+                            ) {
+                                Column(modifier = Modifier.padding(top = 12.dp)) {
+                                    Text(
+                                        text = "Schweiflänge: ${(config.tailLength * 100).toInt()} % des Rands",
+                                        color = TextPrimary,
+                                        style = MaterialTheme.typography.bodyMedium
+                                    )
+                                    Slider(
+                                        value = config.tailLength.coerceIn(0.1f, 0.9f),
+                                        onValueChange = { viewModel.updateLineStyle(tailLength = it) },
+                                        valueRange = 0.1f..0.9f,
+                                        colors = SliderDefaults.colors(thumbColor = NeonCyan, activeTrackColor = NeonCyan),
+                                        modifier = Modifier.testTag("tail_length_slider")
+                                    )
+                                }
+                            }
 
                             Spacer(modifier = Modifier.height(8.dp))
-
                             Text(
-                                text = "Formenabstand: ${config.shapeSpacing.toInt()} px",
+                                text = "Leucht-Reichweite ins Display: ${config.glowReach.toInt()} px",
                                 color = TextPrimary,
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.SemiBold
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                            Text(
+                                text = "Wie weit Aura und Leuchtschein vom Rand nach innen ziehen",
+                                color = TextMuted,
+                                style = MaterialTheme.typography.labelSmall
                             )
                             Slider(
-                                value = config.shapeSpacing,
-                                onValueChange = { viewModel.setShapeParameters(config.shapeSize, it) },
+                                value = config.glowReach.coerceIn(20f, 400f),
+                                onValueChange = { viewModel.updateLineStyle(glowReach = it) },
+                                valueRange = 20f..400f,
+                                colors = SliderDefaults.colors(thumbColor = NeonCyan, activeTrackColor = NeonCyan),
+                                modifier = Modifier.testTag("glow_reach_slider")
+                            )
+                        }
+                    }
+                }
+
+                // Deckkraft
+                item {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(20.dp),
+                        colors = CardDefaults.cardColors(containerColor = DarkSurface),
+                        border = CardDefaults.outlinedCardBorder()
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "Deckkraft",
+                                    color = TextPrimary,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = "${config.opacityPercent} %",
+                                    color = NeonCyan,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            Text(
+                                text = "100 % = Rand verdeckt den Inhalt darunter vollständig. Weniger = durchscheinend.",
+                                color = TextMuted,
+                                style = MaterialTheme.typography.labelSmall
+                            )
+                            Slider(
+                                value = config.opacityPercent.toFloat(),
+                                onValueChange = { viewModel.updateOpacity(it.toInt()) },
                                 valueRange = 10f..100f,
-                                colors = SliderDefaults.colors(thumbColor = NeonMagenta, activeTrackColor = NeonMagenta)
+                                colors = SliderDefaults.colors(thumbColor = NeonCyan, activeTrackColor = NeonCyan),
+                                modifier = Modifier.testTag("opacity_slider")
+                            )
+                        }
+                    }
+                }
+
+                // Bewegung & Puls
+                item {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(20.dp),
+                        colors = CardDefaults.cardColors(containerColor = DarkSurface),
+                        border = CardDefaults.outlinedCardBorder()
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Text(
+                                text = "Bewegung & Puls",
+                                color = TextPrimary,
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            FlowRow(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                AnimationMode.entries.forEach { mode ->
+                                    FilterChip(
+                                        selected = config.animationMode == mode,
+                                        onClick = { viewModel.updateMotion(animationMode = mode) },
+                                        label = { Text(mode.displayName) },
+                                        colors = FilterChipDefaults.filterChipColors(
+                                            selectedContainerColor = ElectricPurple,
+                                            selectedLabelColor = TextPrimary,
+                                            labelColor = TextSecondary
+                                        ),
+                                        modifier = Modifier.testTag("motion_mode_${mode.name}")
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            val moveEnabled = config.animationMode != AnimationMode.PULSE
+                            Text(
+                                text = "Bewegungstempo: ${String.format("%.1f", config.animationSpeed)}x" +
+                                        "  (eine Runde in ${String.format("%.1f", 10f / config.animationSpeed)} s)",
+                                color = if (moveEnabled) TextPrimary else TextMuted,
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                            Slider(
+                                value = config.animationSpeed.coerceIn(0.2f, 20f),
+                                onValueChange = { viewModel.updateGeometry(animationSpeed = it) },
+                                valueRange = 0.2f..20f,
+                                enabled = moveEnabled,
+                                colors = SliderDefaults.colors(thumbColor = ElectricPurple, activeTrackColor = ElectricPurple),
+                                modifier = Modifier.testTag("rotation_speed_slider")
+                            )
+
+                            val pulseEnabled = config.animationMode != AnimationMode.ROTATE
+                            Text(
+                                text = "Pulskurve",
+                                color = if (pulseEnabled) TextPrimary else TextMuted,
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            FlowRow(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                PulseCurve.entries.forEach { curve ->
+                                    FilterChip(
+                                        selected = config.pulseCurve == curve,
+                                        enabled = pulseEnabled,
+                                        onClick = { viewModel.updateMotion(pulseCurve = curve) },
+                                        label = { Text(curve.displayName) },
+                                        colors = FilterChipDefaults.filterChipColors(
+                                            selectedContainerColor = NeonCyan.copy(alpha = 0.25f),
+                                            selectedLabelColor = NeonCyan,
+                                            labelColor = TextSecondary
+                                        ),
+                                        modifier = Modifier.testTag("pulse_curve_${curve.name}")
+                                    )
+                                }
+                            }
+                            Text(
+                                text = config.pulseCurve.description,
+                                color = TextMuted,
+                                style = MaterialTheme.typography.labelSmall
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = "Pulstempo: ein Atemzug alle ${String.format("%.1f", 1f / config.pulseSpeed)} s",
+                                color = if (pulseEnabled) TextPrimary else TextMuted,
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                            Slider(
+                                value = config.pulseSpeed.coerceIn(0.125f, 2f),
+                                onValueChange = { viewModel.updateMotion(pulseSpeed = it) },
+                                valueRange = 0.125f..2f,
+                                enabled = pulseEnabled,
+                                colors = SliderDefaults.colors(thumbColor = NeonCyan, activeTrackColor = NeonCyan),
+                                modifier = Modifier.testTag("pulse_speed_slider")
+                            )
+                            Text(
+                                text = "Pulsstärke: ${(config.pulseStrength * 100).toInt()} %",
+                                color = if (pulseEnabled) TextPrimary else TextMuted,
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                            Text(
+                                text = "Wie stark das Licht beim Ausatmen abtaucht – niedrig = ruhiger",
+                                color = TextMuted,
+                                style = MaterialTheme.typography.labelSmall
+                            )
+                            Slider(
+                                value = config.pulseStrength.coerceIn(0.1f, 1f),
+                                onValueChange = { viewModel.updateMotion(pulseStrength = it) },
+                                valueRange = 0.1f..1f,
+                                enabled = pulseEnabled,
+                                colors = SliderDefaults.colors(thumbColor = NeonCyan, activeTrackColor = NeonCyan),
+                                modifier = Modifier.testTag("pulse_strength_slider")
                             )
                         }
                     }
@@ -617,7 +753,7 @@ fun EdgeDashboardScreen(
                                 fontWeight = FontWeight.Bold
                             )
                             Text(
-                                text = "Setzt Farben, Bewegung, Tempo und Randstärke auf einmal – danach frei anpassbar.",
+                                text = "Setzt Stil, Farben, Bewegung, Puls und Randstärke auf einmal – danach frei anpassbar.",
                                 color = TextMuted,
                                 style = MaterialTheme.typography.labelSmall
                             )
@@ -627,7 +763,7 @@ fun EdgeDashboardScreen(
                                 val isActive = !config.useCustomColors &&
                                         config.selectedPaletteId == profile.paletteId &&
                                         config.animationMode == profile.animationMode &&
-                                        config.shapeType == BorderShapeType.CONTINUOUS_LINE
+                                        config.lineStyle == profile.lineStyle
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -689,52 +825,13 @@ fun EdgeDashboardScreen(
                     ) {
                         Column(modifier = Modifier.padding(16.dp)) {
                             Text(
-                                text = "Rand-Geometrie & Leuchtstärke",
+                                text = "Rand-Geometrie",
                                 color = TextPrimary,
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold
                             )
 
                             Spacer(modifier = Modifier.height(16.dp))
-
-                            // Helligkeits-Regler (10% bis 100%)
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(
-                                        imageVector = Icons.Default.Brightness6,
-                                        contentDescription = null,
-                                        tint = NeonCyan,
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(
-                                        text = "Leucht-Helligkeit",
-                                        color = TextPrimary,
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        fontWeight = FontWeight.SemiBold
-                                    )
-                                }
-                                Text(
-                                    text = "${config.brightnessPercent} %",
-                                    color = NeonCyan,
-                                    fontWeight = FontWeight.Bold,
-                                    style = MaterialTheme.typography.titleSmall
-                                )
-                            }
-                            Slider(
-                                value = config.brightnessPercent.toFloat(),
-                                onValueChange = { viewModel.updateBrightness(it.toInt()) },
-                                valueRange = 10f..100f,
-                                steps = 17,
-                                colors = SliderDefaults.colors(thumbColor = NeonCyan, activeTrackColor = NeonCyan),
-                                modifier = Modifier.testTag("brightness_slider")
-                            )
-
-                            Spacer(modifier = Modifier.height(12.dp))
 
                             Text(
                                 text = "Randstärke: ${config.borderThickness.toInt()} px",
@@ -746,65 +843,6 @@ fun EdgeDashboardScreen(
                                 onValueChange = { viewModel.updateGeometry(borderThickness = it) },
                                 valueRange = 4f..60f,
                                 colors = SliderDefaults.colors(thumbColor = NeonCyan, activeTrackColor = NeonCyan)
-                            )
-
-                            // Bewegungsart: Drehen / Pulsieren / beides
-                            Text(
-                                text = "Bewegung",
-                                color = TextPrimary,
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                            Spacer(modifier = Modifier.height(6.dp))
-                            FlowRow(
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                AnimationMode.entries.forEach { mode ->
-                                    FilterChip(
-                                        selected = config.animationMode == mode,
-                                        onClick = { viewModel.updateMotion(animationMode = mode) },
-                                        label = { Text(mode.displayName) },
-                                        colors = FilterChipDefaults.filterChipColors(
-                                            selectedContainerColor = ElectricPurple,
-                                            selectedLabelColor = TextPrimary,
-                                            labelColor = TextSecondary
-                                        ),
-                                        modifier = Modifier.testTag("motion_mode_${mode.name}")
-                                    )
-                                }
-                            }
-                            Spacer(modifier = Modifier.height(8.dp))
-
-                            val rotationEnabled = config.animationMode != AnimationMode.PULSE
-                            Text(
-                                text = "Drehgeschwindigkeit: ${String.format("%.1f", config.animationSpeed)}x" +
-                                        "  (eine Runde in ${String.format("%.1f", 10f / config.animationSpeed)} s)",
-                                color = if (rotationEnabled) TextPrimary else TextMuted,
-                                style = MaterialTheme.typography.bodyMedium
-                            )
-                            Slider(
-                                value = config.animationSpeed.coerceIn(0.2f, 20f),
-                                onValueChange = { viewModel.updateGeometry(animationSpeed = it) },
-                                valueRange = 0.2f..20f,
-                                enabled = rotationEnabled,
-                                colors = SliderDefaults.colors(thumbColor = ElectricPurple, activeTrackColor = ElectricPurple),
-                                modifier = Modifier.testTag("rotation_speed_slider")
-                            )
-
-                            val pulseEnabled = config.animationMode != AnimationMode.ROTATE
-                            Text(
-                                text = "Pulsgeschwindigkeit: ein Atemzug alle ${String.format("%.1f", 1f / config.pulseSpeed)} s",
-                                color = if (pulseEnabled) TextPrimary else TextMuted,
-                                style = MaterialTheme.typography.bodyMedium
-                            )
-                            Slider(
-                                value = config.pulseSpeed.coerceIn(0.125f, 2f),
-                                onValueChange = { viewModel.updateMotion(pulseSpeed = it) },
-                                valueRange = 0.125f..2f,
-                                enabled = pulseEnabled,
-                                colors = SliderDefaults.colors(thumbColor = NeonCyan, activeTrackColor = NeonCyan),
-                                modifier = Modifier.testTag("pulse_speed_slider")
                             )
 
                             Text(
@@ -1234,8 +1272,7 @@ fun EdgeDashboardScreen(
                                 paletteId = rule.paletteId,
                                 useCustomColors = rule.useCustomColors,
                                 customColors = rule.customColors,
-                                shapeType = rule.shapeType,
-                                customEmoji = rule.customEmoji,
+                                lineStyle = rule.lineStyle,
                                 durationSeconds = rule.durationSeconds
                             )
                         }
@@ -1309,8 +1346,7 @@ fun EdgeDashboardScreen(
                                     paletteId = rule.paletteId,
                                     useCustomColors = rule.useCustomColors,
                                     customColors = rule.customColors,
-                                    shapeType = rule.shapeType,
-                                    customEmoji = rule.customEmoji,
+                                    lineStyle = rule.lineStyle,
                                     durationSeconds = rule.durationSeconds
                                 )
                             }
@@ -1784,7 +1820,7 @@ fun EdgeDashboardScreen(
                                     id = UUID.randomUUID().toString(),
                                     contactIdentifier = newContactName.trim(),
                                     paletteId = newContactPaletteId,
-                                    shapeType = BorderShapeType.HEART,
+                                    lineStyle = LineStyle.COMET,
                                     durationSeconds = 8
                                 )
                             )

@@ -24,10 +24,11 @@ import com.example.data.OverlayRuntimeState
 import com.example.model.AnimationMode
 import com.example.model.BatterySaverConfig
 import com.example.model.PROCESSING_PULSE_COLORS
+import com.example.model.PulseCurve
 import com.example.model.BatteryStatus
-import com.example.model.BorderShapeType
 import com.example.model.EdgeConfig
 import com.example.model.EdgeScheduleConfig
+import com.example.model.LineStyle
 import com.example.rendering.EdgeLightRenderer
 import com.example.util.BatteryMonitor
 import kotlinx.coroutines.CoroutineScope
@@ -67,8 +68,7 @@ class EdgeOverlayService : Service() {
         const val EXTRA_PALETTE_ID = "extra_palette_id"
         const val EXTRA_USE_CUSTOM_COLORS = "extra_use_custom_colors"
         const val EXTRA_CUSTOM_COLORS_CSV = "extra_custom_colors_csv"
-        const val EXTRA_SHAPE_TYPE = "extra_shape_type"
-        const val EXTRA_CUSTOM_EMOJI = "extra_custom_emoji"
+        const val EXTRA_LINE_STYLE = "extra_line_style"
         const val EXTRA_DURATION_SECONDS = "extra_duration_seconds"
         const val EXTRA_WAKE_SCREEN = "extra_wake_screen"
 
@@ -98,8 +98,7 @@ class EdgeOverlayService : Service() {
             paletteId: Int,
             useCustomColors: Boolean,
             customColorsCsv: String,
-            shapeType: String,
-            customEmoji: String,
+            lineStyle: String,
             durationSeconds: Int,
             wakeScreen: Boolean
         ) {
@@ -108,8 +107,7 @@ class EdgeOverlayService : Service() {
                 putExtra(EXTRA_PALETTE_ID, paletteId)
                 putExtra(EXTRA_USE_CUSTOM_COLORS, useCustomColors)
                 putExtra(EXTRA_CUSTOM_COLORS_CSV, customColorsCsv)
-                putExtra(EXTRA_SHAPE_TYPE, shapeType)
-                putExtra(EXTRA_CUSTOM_EMOJI, customEmoji)
+                putExtra(EXTRA_LINE_STYLE, lineStyle)
                 putExtra(EXTRA_DURATION_SECONDS, durationSeconds)
                 putExtra(EXTRA_WAKE_SCREEN, wakeScreen)
             }
@@ -181,27 +179,21 @@ class EdgeOverlayService : Service() {
         val paletteId = intent.getIntExtra(EXTRA_PALETTE_ID, 0)
         val useCustom = intent.getBooleanExtra(EXTRA_USE_CUSTOM_COLORS, false)
         val customColorsCsv = intent.getStringExtra(EXTRA_CUSTOM_COLORS_CSV) ?: ""
-        val shapeName = intent.getStringExtra(EXTRA_SHAPE_TYPE) ?: BorderShapeType.CONTINUOUS_LINE.name
-        val customEmoji = intent.getStringExtra(EXTRA_CUSTOM_EMOJI) ?: ""
+        val styleName = intent.getStringExtra(EXTRA_LINE_STYLE) ?: LineStyle.RING.name
         val durationSeconds = intent.getIntExtra(EXTRA_DURATION_SECONDS, 6).coerceIn(2, 30)
         val wakeScreen = intent.getBooleanExtra(EXTRA_WAKE_SCREEN, true)
 
         val customColors = customColorsCsv.split(",")
             .mapNotNull { it.trim().toLongOrNull() }
 
-        val shape = try {
-            BorderShapeType.valueOf(shapeName)
-        } catch (_: Exception) {
-            BorderShapeType.CONTINUOUS_LINE
-        }
+        val style = LineStyle.entries.firstOrNull { it.name == styleName } ?: LineStyle.RING
 
         val baseConfig = repository.configFlow.value
         temporaryConfig = baseConfig.copy(
             selectedPaletteId = paletteId,
             useCustomColors = useCustom,
             customColors = if (useCustom && customColors.isNotEmpty()) customColors else baseConfig.customColors,
-            shapeType = shape,
-            customEmoji = customEmoji.ifBlank { baseConfig.customEmoji },
+            lineStyle = style,
             isCallerAlertActive = true
         )
 
@@ -391,7 +383,8 @@ class EdgeOverlayService : Service() {
     private fun processingConfig(base: EdgeConfig): EdgeConfig = base.copy(
         useCustomColors = true,
         customColors = PROCESSING_PULSE_COLORS,
-        shapeType = BorderShapeType.CONTINUOUS_LINE,
+        lineStyle = LineStyle.AURA,
+        pulseCurve = PulseCurve.BREATH,
         animationMode = AnimationMode.PULSE,
         isGlowEnabled = true,
         isCallerAlertActive = false

@@ -4,7 +4,9 @@ import android.content.Context
 import android.graphics.Canvas
 import androidx.test.core.app.ApplicationProvider
 import com.example.model.BatterySaverConfig
-import com.example.model.BorderShapeType
+import com.example.model.LineStyle
+import com.example.model.AnimationMode
+import com.example.model.PulseCurve
 import com.example.model.ContactEdgeRule
 import com.example.model.DefaultAppRules
 import com.example.model.EdgeColorPalette
@@ -66,7 +68,7 @@ class ExampleRobolectricTest {
         val config = EdgeConfig()
         assertEquals(false, config.isOverlayEnabled)
         assertEquals(false, config.isCallerIdAlertEnabled)
-        assertEquals(BorderShapeType.CONTINUOUS_LINE, config.shapeType)
+        assertEquals(LineStyle.RING, config.lineStyle)
         assertEquals(NotchType.NONE, config.notchConfig.notchType)
         assertTrue(config.borderThickness > 0f)
         assertTrue(config.animationSpeed > 0f)
@@ -95,7 +97,7 @@ class ExampleRobolectricTest {
             paletteId = 41
         )
         assertEquals("Mama", contactRule.contactIdentifier)
-        assertEquals(BorderShapeType.HEART, contactRule.shapeType)
+        assertEquals(LineStyle.COMET, contactRule.lineStyle)
     }
 
     @Test
@@ -203,30 +205,39 @@ class ExampleRobolectricTest {
     }
 
     @Test
-    fun `verify EdgeLightRenderer with all border shape types`() {
+    fun `verify EdgeLightRenderer with all line styles, motion modes and pulse curves`() {
         val renderer = EdgeLightRenderer()
         val dummyCanvas = Canvas()
 
-        for (shape in BorderShapeType.values()) {
-            val testConfig = EdgeConfig(
-                shapeType = shape,
-                customEmoji = "🔥",
-                shapeSize = 32f,
-                shapeSpacing = 40f
-            )
-
-            renderer.updateDimensions(1080f, 2400f, testConfig)
-            renderer.render(dummyCanvas, testConfig, 2_000_000_000L)
+        for (style in LineStyle.entries) {
+            for (mode in AnimationMode.entries) {
+                for (curve in PulseCurve.entries) {
+                    val testConfig = EdgeConfig(
+                        lineStyle = style,
+                        animationMode = mode,
+                        pulseCurve = curve,
+                        tailLength = 0.6f,
+                        glowReach = 180f
+                    )
+                    renderer.updateDimensions(1080f, 2400f, testConfig)
+                    // mehrere Frames inkl. Umlauf über den Startpunkt des Rands
+                    var t = 1_000_000_000L
+                    repeat(5) {
+                        renderer.render(dummyCanvas, testConfig, t)
+                        t += 16_000_000L
+                    }
+                }
+            }
         }
     }
 
     @Test
-    fun `verify brightness setting and scaling in EdgeConfig and EdgeLightRenderer`() {
+    fun `verify opacity setting and scaling in EdgeConfig and EdgeLightRenderer`() {
         val configDefault = EdgeConfig()
-        assertEquals(100, configDefault.brightnessPercent)
+        assertEquals(100, configDefault.opacityPercent)
 
-        val configDimmed = EdgeConfig(brightnessPercent = 45)
-        assertEquals(45, configDimmed.brightnessPercent)
+        val configDimmed = EdgeConfig(opacityPercent = 45)
+        assertEquals(45, configDimmed.opacityPercent)
 
         val renderer = EdgeLightRenderer()
         val dummyCanvas = Canvas()

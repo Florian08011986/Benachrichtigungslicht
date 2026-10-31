@@ -12,12 +12,13 @@ import androidx.datastore.preferences.preferencesDataStore
 import com.example.model.AnimationMode
 import com.example.model.AppEdgeRule
 import com.example.model.BatterySaverConfig
-import com.example.model.BorderShapeType
 import com.example.model.ContactEdgeRule
 import com.example.model.DefaultAppRules
 import com.example.model.EdgeConfig
 import com.example.model.EdgeScheduleConfig
 import com.example.model.LightProfile
+import com.example.model.LineStyle
+import com.example.model.PulseCurve
 import com.example.model.NotchConfig
 import com.example.model.NotchType
 import com.example.model.NotificationEdgeSettings
@@ -78,10 +79,11 @@ class EdgePreferencesRepository private constructor(context: Context) {
         val PALETTE_ID = intPreferencesKey("palette_id")
         val USE_CUSTOM_COLORS = booleanPreferencesKey("use_custom_colors")
         val CUSTOM_COLORS_CSV = stringPreferencesKey("custom_colors_csv")
-        val SHAPE_TYPE = stringPreferencesKey("shape_type")
-        val CUSTOM_EMOJI = stringPreferencesKey("custom_emoji")
-        val SHAPE_SIZE = floatPreferencesKey("shape_size")
-        val SHAPE_SPACING = floatPreferencesKey("shape_spacing")
+        val LINE_STYLE = stringPreferencesKey("line_style")
+        val TAIL_LENGTH = floatPreferencesKey("tail_length")
+        val GLOW_REACH = floatPreferencesKey("glow_reach")
+        val PULSE_CURVE = stringPreferencesKey("pulse_curve")
+        val PULSE_STRENGTH = floatPreferencesKey("pulse_strength")
         val BORDER_THICKNESS = floatPreferencesKey("border_thickness")
         val ANIMATION_SPEED = floatPreferencesKey("animation_speed")
         val CORNER_RADIUS_TOP = floatPreferencesKey("corner_radius_top")
@@ -93,7 +95,7 @@ class EdgePreferencesRepository private constructor(context: Context) {
         val NOTCH_OFFSET_Y = floatPreferencesKey("notch_offset_y")
         val NOTCH_RADIUS = floatPreferencesKey("notch_radius")
         val GLOW_ENABLED = booleanPreferencesKey("glow_enabled")
-        val BRIGHTNESS_PERCENT = intPreferencesKey("brightness_percent")
+        val OPACITY_PERCENT = intPreferencesKey("brightness_percent") // Schlüssel beibehalten: bisheriger Wert wird übernommen
         val ANIMATION_MODE = stringPreferencesKey("animation_mode")
         val PULSE_SPEED = floatPreferencesKey("pulse_speed")
         val LIVE_PREVIEW_ENABLED = booleanPreferencesKey("live_preview_enabled")
@@ -131,11 +133,7 @@ class EdgePreferencesRepository private constructor(context: Context) {
                 ?.takeIf { it.isNotEmpty() }
                 ?: listOf(0xFF00E5FFL, 0xFFD500F9L, 0xFFFF1744L)
 
-            val shapeType = try {
-                BorderShapeType.valueOf(prefs[Keys.SHAPE_TYPE] ?: BorderShapeType.CONTINUOUS_LINE.name)
-            } catch (_: Exception) {
-                BorderShapeType.CONTINUOUS_LINE
-            }
+            val lineStyle = parseEnum(prefs[Keys.LINE_STYLE], LineStyle.RING)
 
             val notchType = try {
                 NotchType.valueOf(prefs[Keys.NOTCH_TYPE] ?: NotchType.NONE.name)
@@ -155,14 +153,13 @@ class EdgePreferencesRepository private constructor(context: Context) {
             EdgeConfig(
                 isOverlayEnabled = prefs[Keys.OVERLAY_ENABLED] ?: false,
                 isCallerIdAlertEnabled = prefs[Keys.CALLER_ID_ENABLED] ?: false,
-                brightnessPercent = prefs[Keys.BRIGHTNESS_PERCENT] ?: 100,
+                opacityPercent = prefs[Keys.OPACITY_PERCENT] ?: 100,
                 selectedPaletteId = prefs[Keys.PALETTE_ID] ?: 0,
                 useCustomColors = prefs[Keys.USE_CUSTOM_COLORS] ?: false,
                 customColors = customColorsList,
-                shapeType = shapeType,
-                customEmoji = prefs[Keys.CUSTOM_EMOJI] ?: "✨",
-                shapeSize = prefs[Keys.SHAPE_SIZE] ?: 36f,
-                shapeSpacing = prefs[Keys.SHAPE_SPACING] ?: 42f,
+                lineStyle = lineStyle,
+                tailLength = prefs[Keys.TAIL_LENGTH] ?: 0.35f,
+                glowReach = prefs[Keys.GLOW_REACH] ?: 120f,
                 borderThickness = prefs[Keys.BORDER_THICKNESS] ?: 18f,
                 animationSpeed = prefs[Keys.ANIMATION_SPEED] ?: 5f,
                 animationMode = try {
@@ -171,6 +168,8 @@ class EdgePreferencesRepository private constructor(context: Context) {
                     AnimationMode.ROTATE
                 },
                 pulseSpeed = prefs[Keys.PULSE_SPEED] ?: 0.5f,
+                pulseCurve = parseEnum(prefs[Keys.PULSE_CURVE], PulseCurve.SINE),
+                pulseStrength = prefs[Keys.PULSE_STRENGTH] ?: 0.6f,
                 isLivePreviewEnabled = prefs[Keys.LIVE_PREVIEW_ENABLED] ?: true,
                 isProcessingPulseEnabled = prefs[Keys.PROCESSING_PULSE_ENABLED] ?: false,
                 cornerRadiusTop = prefs[Keys.CORNER_RADIUS_TOP] ?: 70f,
@@ -285,10 +284,10 @@ class EdgePreferencesRepository private constructor(context: Context) {
         }
     }
 
-    fun updateBrightness(percent: Int) {
+    fun updateOpacity(percent: Int) {
         val clamped = percent.coerceIn(10, 100)
         scope.launch {
-            applicationContext.dataStore.edit { it[Keys.BRIGHTNESS_PERCENT] = clamped }
+            applicationContext.dataStore.edit { it[Keys.OPACITY_PERCENT] = clamped }
         }
     }
 
@@ -310,22 +309,16 @@ class EdgePreferencesRepository private constructor(context: Context) {
         }
     }
 
-    fun updateShapeType(shape: BorderShapeType, customEmoji: String? = null) {
+    fun updateLineStyle(
+        lineStyle: LineStyle? = null,
+        tailLength: Float? = null,
+        glowReach: Float? = null
+    ) {
         scope.launch {
-            applicationContext.dataStore.edit {
-                it[Keys.SHAPE_TYPE] = shape.name
-                if (customEmoji != null) {
-                    it[Keys.CUSTOM_EMOJI] = customEmoji
-                }
-            }
-        }
-    }
-
-    fun updateShapeParameters(size: Float, spacing: Float) {
-        scope.launch {
-            applicationContext.dataStore.edit {
-                it[Keys.SHAPE_SIZE] = size
-                it[Keys.SHAPE_SPACING] = spacing
+            applicationContext.dataStore.edit { prefs ->
+                lineStyle?.let { prefs[Keys.LINE_STYLE] = it.name }
+                tailLength?.let { prefs[Keys.TAIL_LENGTH] = it }
+                glowReach?.let { prefs[Keys.GLOW_REACH] = it }
             }
         }
     }
@@ -350,26 +343,33 @@ class EdgePreferencesRepository private constructor(context: Context) {
 
     fun updateMotion(
         animationMode: AnimationMode? = null,
-        pulseSpeed: Float? = null
+        pulseSpeed: Float? = null,
+        pulseCurve: PulseCurve? = null,
+        pulseStrength: Float? = null
     ) {
         scope.launch {
             applicationContext.dataStore.edit { prefs ->
                 animationMode?.let { prefs[Keys.ANIMATION_MODE] = it.name }
                 pulseSpeed?.let { prefs[Keys.PULSE_SPEED] = it }
+                pulseCurve?.let { prefs[Keys.PULSE_CURVE] = it.name }
+                pulseStrength?.let { prefs[Keys.PULSE_STRENGTH] = it }
             }
         }
     }
 
-    /** Setzt Farbe, Form, Bewegung und Rand eines Komplettprofils in einem Schreibvorgang. */
+    /** Setzt Stil, Farbe, Bewegung und Rand eines Komplettprofils in einem Schreibvorgang. */
     fun applyLightProfile(profile: LightProfile) {
         scope.launch {
             applicationContext.dataStore.edit { prefs ->
                 prefs[Keys.PALETTE_ID] = profile.paletteId
                 prefs[Keys.USE_CUSTOM_COLORS] = false
-                prefs[Keys.SHAPE_TYPE] = BorderShapeType.CONTINUOUS_LINE.name
+                prefs[Keys.LINE_STYLE] = profile.lineStyle.name
                 prefs[Keys.ANIMATION_MODE] = profile.animationMode.name
                 prefs[Keys.ANIMATION_SPEED] = profile.animationSpeed
                 prefs[Keys.PULSE_SPEED] = profile.pulseSpeed
+                prefs[Keys.PULSE_CURVE] = profile.pulseCurve.name
+                prefs[Keys.PULSE_STRENGTH] = profile.pulseStrength
+                prefs[Keys.GLOW_REACH] = profile.glowReach
                 prefs[Keys.BORDER_THICKNESS] = profile.borderThickness
                 prefs[Keys.GLOW_ENABLED] = profile.glowEnabled
             }
@@ -494,8 +494,8 @@ class EdgePreferencesRepository private constructor(context: Context) {
                 r.paletteId,
                 r.useCustomColors,
                 r.customColors.joinToString(";"),
-                r.shapeType.name,
-                r.customEmoji.ifEmpty { " " },
+                r.lineStyle.name,
+                " ", // reserviert (früher Emoji) – hält das 9-Felder-Format kompatibel
                 r.durationSeconds
             ).joinToString("|||")
         }
@@ -507,7 +507,7 @@ class EdgePreferencesRepository private constructor(context: Context) {
             if (p.size >= 9) {
                 val customCol = p[5].split(";")
                     .mapNotNull { it.trim().toLongOrNull() }
-                val shape = try { BorderShapeType.valueOf(p[6]) } catch (_: Exception) { BorderShapeType.CONTINUOUS_LINE }
+                val style = parseEnum(p[6], LineStyle.RING)
                 AppEdgeRule(
                     packageName = p[0],
                     appName = p[1],
@@ -515,8 +515,7 @@ class EdgePreferencesRepository private constructor(context: Context) {
                     paletteId = p[3].toIntOrNull() ?: 0,
                     useCustomColors = p[4].toBooleanStrictOrNull() ?: false,
                     customColors = customCol,
-                    shapeType = shape,
-                    customEmoji = p[7].trim(),
+                    lineStyle = style,
                     durationSeconds = p[8].toIntOrNull() ?: 6
                 )
             } else null
@@ -532,8 +531,8 @@ class EdgePreferencesRepository private constructor(context: Context) {
                 r.paletteId,
                 r.useCustomColors,
                 r.customColors.joinToString(";"),
-                r.shapeType.name,
-                r.customEmoji.ifEmpty { " " },
+                r.lineStyle.name,
+                " ", // reserviert (früher Emoji) – hält das 9-Felder-Format kompatibel
                 r.durationSeconds
             ).joinToString("|||")
         }
@@ -545,7 +544,7 @@ class EdgePreferencesRepository private constructor(context: Context) {
             if (p.size >= 9) {
                 val customCol = p[5].split(";")
                     .mapNotNull { it.trim().toLongOrNull() }
-                val shape = try { BorderShapeType.valueOf(p[6]) } catch (_: Exception) { BorderShapeType.HEART }
+                val style = parseEnum(p[6], LineStyle.COMET)
                 ContactEdgeRule(
                     id = p[0].ifBlank { UUID.randomUUID().toString() },
                     contactIdentifier = p[1],
@@ -553,13 +552,16 @@ class EdgePreferencesRepository private constructor(context: Context) {
                     paletteId = p[3].toIntOrNull() ?: 41,
                     useCustomColors = p[4].toBooleanStrictOrNull() ?: false,
                     customColors = customCol,
-                    shapeType = shape,
-                    customEmoji = p[7].trim(),
+                    lineStyle = style,
                     durationSeconds = p[8].toIntOrNull() ?: 8
                 )
             } else null
         }
     }
+
+    /** Liest einen Enum-Namen tolerant; unbekannte/alte Werte (z. B. frühere Figuren) fallen auf [default] zurück. */
+    private inline fun <reified T : Enum<T>> parseEnum(name: String?, default: T): T =
+        if (name == null) default else enumValues<T>().firstOrNull { it.name == name } ?: default
 
     companion object {
         @Volatile

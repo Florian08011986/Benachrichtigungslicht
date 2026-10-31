@@ -6,7 +6,6 @@ import android.os.PowerManager
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import com.example.data.EdgePreferencesRepository
-import com.example.model.BorderShapeType
 
 class EdgeNotificationListenerService : NotificationListenerService() {
 
@@ -99,8 +98,7 @@ class EdgeNotificationListenerService : NotificationListenerService() {
                 paletteId = matchedContact.paletteId,
                 useCustomColors = matchedContact.useCustomColors,
                 customColorsCsv = matchedContact.customColors.joinToString(","),
-                shapeType = matchedContact.shapeType.name,
-                customEmoji = matchedContact.customEmoji,
+                lineStyle = matchedContact.lineStyle.name,
                 durationSeconds = matchedContact.durationSeconds,
                 wakeScreen = notifSettings.wakeScreenOnNotification
             )
@@ -118,8 +116,7 @@ class EdgeNotificationListenerService : NotificationListenerService() {
                 paletteId = matchedApp.paletteId,
                 useCustomColors = matchedApp.useCustomColors,
                 customColorsCsv = matchedApp.customColors.joinToString(","),
-                shapeType = matchedApp.shapeType.name,
-                customEmoji = matchedApp.customEmoji,
+                lineStyle = matchedApp.lineStyle.name,
                 durationSeconds = matchedApp.durationSeconds,
                 wakeScreen = notifSettings.wakeScreenOnNotification
             )
@@ -132,8 +129,7 @@ class EdgeNotificationListenerService : NotificationListenerService() {
             paletteId = baseConfig.selectedPaletteId,
             useCustomColors = baseConfig.useCustomColors,
             customColorsCsv = baseConfig.customColors.joinToString(","),
-            shapeType = baseConfig.shapeType.name,
-            customEmoji = baseConfig.customEmoji,
+            lineStyle = baseConfig.lineStyle.name,
             durationSeconds = notifSettings.defaultAlertDurationSeconds,
             wakeScreen = notifSettings.wakeScreenOnNotification
         )

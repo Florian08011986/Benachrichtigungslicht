@@ -7,8 +7,7 @@ data class AppEdgeRule(
     val paletteId: Int = 0,
     val useCustomColors: Boolean = false,
     val customColors: List<Long> = emptyList(),
-    val shapeType: BorderShapeType = BorderShapeType.CONTINUOUS_LINE,
-    val customEmoji: String = "",
+    val lineStyle: LineStyle = LineStyle.RING,
     val durationSeconds: Int = 6
 )
 
@@ -19,8 +18,7 @@ data class ContactEdgeRule(
     val paletteId: Int = 41, // e.g. Crimson Red or custom
     val useCustomColors: Boolean = false,
     val customColors: List<Long> = emptyList(),
-    val shapeType: BorderShapeType = BorderShapeType.HEART,
-    val customEmoji: String = "💖",
+    val lineStyle: LineStyle = LineStyle.COMET,
     val durationSeconds: Int = 8
 )
 
@@ -39,7 +37,7 @@ object DefaultAppRules {
             appName = "WhatsApp",
             isEnabled = true,
             paletteId = 3, // Matrix / Neon Green
-            shapeType = BorderShapeType.CONTINUOUS_LINE,
+            lineStyle = LineStyle.RING,
             durationSeconds = 6
         ),
         AppEdgeRule(
@@ -47,7 +45,7 @@ object DefaultAppRules {
             appName = "Telegram",
             isEnabled = true,
             paletteId = 2, // Electric Cyan
-            shapeType = BorderShapeType.CONTINUOUS_LINE,
+            lineStyle = LineStyle.RING,
             durationSeconds = 6
         ),
         AppEdgeRule(
@@ -55,7 +53,7 @@ object DefaultAppRules {
             appName = "Instagram",
             isEnabled = true,
             paletteId = 5, // Synthwave Sunset / Magenta
-            shapeType = BorderShapeType.CONTINUOUS_LINE,
+            lineStyle = LineStyle.RING,
             durationSeconds = 6
         ),
         AppEdgeRule(
@@ -63,7 +61,7 @@ object DefaultAppRules {
             appName = "Messages (SMS)",
             isEnabled = true,
             paletteId = 0, // Cyber Neon
-            shapeType = BorderShapeType.STAR,
+            lineStyle = LineStyle.COMET,
             durationSeconds = 6
         ),
         AppEdgeRule(
@@ -71,7 +69,7 @@ object DefaultAppRules {
             appName = "Gmail",
             isEnabled = true,
             paletteId = 41, // Blood Crimson
-            shapeType = BorderShapeType.CONTINUOUS_LINE,
+            lineStyle = LineStyle.RING,
             durationSeconds = 5
         ),
         AppEdgeRule(
@@ -79,7 +77,7 @@ object DefaultAppRules {
             appName = "Snapchat",
             isEnabled = true,
             paletteId = 42, // Acid Yellow
-            shapeType = BorderShapeType.SUN,
+            lineStyle = LineStyle.RUNNING_LIGHTS,
             durationSeconds = 6
         )
     )
