@@ -106,6 +106,7 @@ import com.example.ui.components.ContactRuleCard
 import com.example.ui.components.CustomColorEditor
 import com.example.ui.components.LivePreviewCard
 import com.example.model.AnimationMode
+import com.example.model.LightProfiles
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import com.example.ui.theme.DarkBorder
 import com.example.ui.theme.DarkOledBg
@@ -423,7 +424,7 @@ fun EdgeDashboardScreen(
 
                 // Kategorie-Filter-Chips auf Deutsch
                 item {
-                    val categories = listOf("Alle", "Neon", "Cosmic", "Elements", "Pastel", "Vibrant")
+                    val categories = listOf("Alle", "KI", "Neon", "Cosmic", "Elements", "Pastel", "Vibrant")
                     LazyRow(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         modifier = Modifier.fillMaxWidth()
@@ -600,6 +601,85 @@ fun EdgeDashboardScreen(
 
             // TAB 2: GEOMETRIE & NOTCH
             if (selectedTab == 2) {
+                // Komplettprofile: Farbe + Bewegung + Rand mit einem Tipp
+                item {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(20.dp),
+                        colors = CardDefaults.cardColors(containerColor = DarkSurface),
+                        border = CardDefaults.outlinedCardBorder()
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Text(
+                                text = "Licht- & Pulsprofile",
+                                color = TextPrimary,
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "Setzt Farben, Bewegung, Tempo und Randstärke auf einmal – danach frei anpassbar.",
+                                color = TextMuted,
+                                style = MaterialTheme.typography.labelSmall
+                            )
+                            Spacer(modifier = Modifier.height(10.dp))
+                            LightProfiles.ALL.forEach { profile ->
+                                val preset = EdgeColorPalette.getPreset(profile.paletteId)
+                                val isActive = !config.useCustomColors &&
+                                        config.selectedPaletteId == profile.paletteId &&
+                                        config.animationMode == profile.animationMode &&
+                                        config.shapeType == BorderShapeType.CONTINUOUS_LINE
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 4.dp)
+                                        .clip(RoundedCornerShape(14.dp))
+                                        .background(DarkSurfaceVariant)
+                                        .border(
+                                            1.dp,
+                                            if (isActive) NeonCyan else DarkBorder,
+                                            RoundedCornerShape(14.dp)
+                                        )
+                                        .clickable { viewModel.applyLightProfile(profile) }
+                                        .padding(12.dp)
+                                        .testTag("light_profile_${profile.id}"),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(width = 10.dp, height = 40.dp)
+                                            .clip(RoundedCornerShape(5.dp))
+                                            .background(
+                                                androidx.compose.ui.graphics.Brush.verticalGradient(
+                                                    preset.colors.map { Color(it) }
+                                                )
+                                            )
+                                    )
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = profile.name,
+                                            color = TextPrimary,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                        Text(
+                                            text = profile.description,
+                                            color = TextSecondary,
+                                            style = MaterialTheme.typography.bodySmall
+                                        )
+                                    }
+                                    if (isActive) {
+                                        Icon(
+                                            imageVector = Icons.Default.CheckCircle,
+                                            contentDescription = "Aktiv",
+                                            tint = NeonCyan
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
                 item {
                     Card(
                         modifier = Modifier.fillMaxWidth(),

@@ -26,6 +26,44 @@ enum class AnimationMode(val displayName: String) {
     ROTATE_AND_PULSE("Drehen + Pulsieren")
 }
 
+/** Komplettprofil: Farbe + Bewegung + Rand in einem Tipp. */
+data class LightProfile(
+    val id: String,
+    val name: String,
+    val description: String,
+    val paletteId: Int,
+    val animationMode: AnimationMode,
+    val animationSpeed: Float,
+    val pulseSpeed: Float,
+    val borderThickness: Float,
+    val glowEnabled: Boolean = true
+)
+
+object LightProfiles {
+    val ALL: List<LightProfile> = listOf(
+        LightProfile(
+            id = "ki_atem_blau",
+            name = "KI-Atem Blau",
+            description = "Blau-violetter Verlauf, langsam kreisend, atmet etwa alle 1,4 s",
+            paletteId = 48,
+            animationMode = AnimationMode.ROTATE_AND_PULSE,
+            animationSpeed = 0.8f,
+            pulseSpeed = 0.7f,
+            borderThickness = 12f
+        ),
+        LightProfile(
+            id = "agenten_glow",
+            name = "Agenten-Glow",
+            description = "Türkis-blauer Rahmen, steht still und atmet ruhig etwa alle 2,2 s",
+            paletteId = 49,
+            animationMode = AnimationMode.PULSE,
+            animationSpeed = 1f,
+            pulseSpeed = 0.45f,
+            borderThickness = 8f
+        )
+    )
+}
+
 /** Feste Blau-Palette für das „Verarbeitung läuft“-Pulsieren. */
 val PROCESSING_PULSE_COLORS: List<Long> = listOf(0xFF1E6BFFL, 0xFF00C2FFL, 0xFF6A5CFFL)
 

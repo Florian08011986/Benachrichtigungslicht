@@ -36,13 +36,13 @@ class ExampleRobolectricTest {
     }
 
     @Test
-    fun `verify exactly 48 edge color presets`() {
-        assertEquals(48, EdgeColorPalette.PRESETS.size)
+    fun `verify exactly 50 edge color presets`() {
+        assertEquals(50, EdgeColorPalette.PRESETS.size)
 
         val ids = EdgeColorPalette.PRESETS.map { it.id }
-        assertEquals(48, ids.toSet().size)
+        assertEquals(50, ids.toSet().size)
         assertEquals(0, ids.minOrNull())
-        assertEquals(47, ids.maxOrNull())
+        assertEquals(49, ids.maxOrNull())
 
         for (preset in EdgeColorPalette.PRESETS) {
             assertTrue("Preset ${preset.name} must have at least 2 colors", preset.colors.size >= 2)

@@ -14,6 +14,7 @@ import com.example.model.BorderShapeType
 import com.example.model.ContactEdgeRule
 import com.example.model.EdgeConfig
 import com.example.model.EdgeScheduleConfig
+import com.example.model.LightProfile
 import com.example.model.NotchConfig
 import com.example.model.NotificationEdgeSettings
 import com.example.service.CallerIdMonitorService
@@ -153,6 +154,10 @@ class EdgeDashboardViewModel(application: Application) : AndroidViewModel(applic
 
     fun updateMotion(animationMode: AnimationMode? = null, pulseSpeed: Float? = null) {
         repository.updateMotion(animationMode = animationMode, pulseSpeed = pulseSpeed)
+    }
+
+    fun applyLightProfile(profile: LightProfile) {
+        repository.applyLightProfile(profile)
     }
 
     /** Live-Vorschau am echten Bildschirmrand ein-/ausschalten (nur solange die App sichtbar ist). */

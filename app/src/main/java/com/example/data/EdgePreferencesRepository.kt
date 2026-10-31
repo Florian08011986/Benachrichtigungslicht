@@ -17,6 +17,7 @@ import com.example.model.ContactEdgeRule
 import com.example.model.DefaultAppRules
 import com.example.model.EdgeConfig
 import com.example.model.EdgeScheduleConfig
+import com.example.model.LightProfile
 import com.example.model.NotchConfig
 import com.example.model.NotchType
 import com.example.model.NotificationEdgeSettings
@@ -355,6 +356,22 @@ class EdgePreferencesRepository private constructor(context: Context) {
             applicationContext.dataStore.edit { prefs ->
                 animationMode?.let { prefs[Keys.ANIMATION_MODE] = it.name }
                 pulseSpeed?.let { prefs[Keys.PULSE_SPEED] = it }
+            }
+        }
+    }
+
+    /** Setzt Farbe, Form, Bewegung und Rand eines Komplettprofils in einem Schreibvorgang. */
+    fun applyLightProfile(profile: LightProfile) {
+        scope.launch {
+            applicationContext.dataStore.edit { prefs ->
+                prefs[Keys.PALETTE_ID] = profile.paletteId
+                prefs[Keys.USE_CUSTOM_COLORS] = false
+                prefs[Keys.SHAPE_TYPE] = BorderShapeType.CONTINUOUS_LINE.name
+                prefs[Keys.ANIMATION_MODE] = profile.animationMode.name
+                prefs[Keys.ANIMATION_SPEED] = profile.animationSpeed
+                prefs[Keys.PULSE_SPEED] = profile.pulseSpeed
+                prefs[Keys.BORDER_THICKNESS] = profile.borderThickness
+                prefs[Keys.GLOW_ENABLED] = profile.glowEnabled
             }
         }
     }
