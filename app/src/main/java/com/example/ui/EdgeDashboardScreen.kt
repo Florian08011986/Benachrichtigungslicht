@@ -730,6 +730,43 @@ fun EdgeDashboardScreen(
                                 colors = SliderDefaults.colors(thumbColor = NeonCyan, activeTrackColor = NeonCyan),
                                 modifier = Modifier.testTag("pulse_strength_slider")
                             )
+
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "Zwei-Stufen-Start",
+                                        color = TextPrimary,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    Text(
+                                        text = "Beim Auslösen kurz ein buntes Spektrum, dann weicher Übergang in deine Farben",
+                                        color = TextMuted,
+                                        style = MaterialTheme.typography.labelSmall
+                                    )
+                                }
+                                Switch(
+                                    checked = config.isTwoStageStartEnabled,
+                                    onCheckedChange = { viewModel.setTwoStageStartEnabled(it) },
+                                    colors = SwitchDefaults.colors(
+                                        checkedThumbColor = NeonCyan,
+                                        checkedTrackColor = DarkSurfaceVariant
+                                    ),
+                                    modifier = Modifier.testTag("two_stage_switch")
+                                )
+                            }
+                            TextButton(
+                                onClick = { viewModel.replayIntro() },
+                                modifier = Modifier.testTag("two_stage_replay")
+                            ) {
+                                Icon(Icons.Default.PlayArrow, contentDescription = null, tint = NeonCyan)
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Start-Effekt am Display ansehen", color = NeonCyan)
+                            }
                         }
                     }
                 }
@@ -1151,8 +1188,43 @@ fun EdgeDashboardScreen(
 
                             Spacer(modifier = Modifier.height(14.dp))
 
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "Bis gelesen weiterpulsieren",
+                                        color = TextPrimary,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    Text(
+                                        text = "Rand atmet, bis die Mitteilung weggewischt oder geöffnet wurde (max. 60 min)",
+                                        color = TextSecondary,
+                                        style = MaterialTheme.typography.bodySmall
+                                    )
+                                }
+                                Switch(
+                                    checked = notifSettings.pulseUntilDismissed,
+                                    onCheckedChange = {
+                                        viewModel.updateNotificationSettings(notifSettings.copy(pulseUntilDismissed = it))
+                                    },
+                                    colors = SwitchDefaults.colors(
+                                        checkedThumbColor = NeonCyan,
+                                        checkedTrackColor = DarkSurfaceVariant
+                                    ),
+                                    modifier = Modifier.testTag("until_dismissed_switch")
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(14.dp))
+
                             Text(
-                                text = "Standard-Leuchtdauer: ${notifSettings.defaultAlertDurationSeconds} Sekunden",
+                                text = if (notifSettings.pulseUntilDismissed)
+                                    "Leuchtdauer: bis gelesen (Regler gilt, wenn aus)"
+                                else
+                                    "Standard-Leuchtdauer: ${notifSettings.defaultAlertDurationSeconds} Sekunden",
                                 color = TextPrimary,
                                 style = MaterialTheme.typography.bodyMedium
                             )

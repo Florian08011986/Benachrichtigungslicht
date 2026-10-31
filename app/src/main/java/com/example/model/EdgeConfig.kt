@@ -81,6 +81,9 @@ object LightProfiles {
     )
 }
 
+/** Eigenes, neutrales Spektrum für die erste Stufe des Zwei-Stufen-Starts. */
+val TWO_STAGE_INTRO_COLORS: List<Long> = listOf(0xFFFF5A6EL, 0xFFFFC23DL, 0xFF35D49AL, 0xFF4C8DFFL)
+
 /** Feste Blau-Palette für das „Verarbeitung läuft“-Pulsieren. */
 val PROCESSING_PULSE_COLORS: List<Long> = listOf(0xFF1E6BFFL, 0xFF00C2FFL, 0xFF6A5CFFL)
 
@@ -111,6 +114,7 @@ data class EdgeConfig(
     val pulseStrength: Float = 0.6f,    // 0.1..1.0, Anteil der Helligkeit, der beim Puls abtaucht
     val isLivePreviewEnabled: Boolean = true,
     val isProcessingPulseEnabled: Boolean = false,
+    val isTwoStageStartEnabled: Boolean = false, // beim Auslösen kurz Mehrfarb-Spektrum, dann Zielfarben
     val cornerRadiusTop: Float = 70f,   // px
     val cornerRadiusBottom: Float = 70f,// px
     val notchConfig: NotchConfig = NotchConfig(),

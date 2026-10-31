@@ -27,7 +27,8 @@ data class NotificationEdgeSettings(
     val wakeScreenOnNotification: Boolean = true,
     val defaultAlertDurationSeconds: Int = 6,
     val onlyWhenScreenOff: Boolean = false,
-    val repeatPulseCount: Int = 1
+    val repeatPulseCount: Int = 1,
+    val pulseUntilDismissed: Boolean = false // Rand atmet weiter, bis die Benachrichtigung entfernt ist
 )
 
 object DefaultAppRules {

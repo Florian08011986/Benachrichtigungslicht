@@ -13,6 +13,7 @@ import com.example.model.EdgeConfig
 import com.example.model.LineStyle
 import com.example.model.NotchType
 import com.example.model.PulseCurve
+import com.example.model.TWO_STAGE_INTRO_COLORS
 import kotlin.math.PI
 import kotlin.math.atan2
 import kotlin.math.floor
@@ -81,6 +82,13 @@ class EdgeLightRenderer {
     private val maskColors = IntArray(MAX_STOPS)
     private val maskPositions = FloatArray(MAX_STOPS)
 
+    // Zwei-Stufen-Start: erst Mehrfarb-Spektrum, dann weiche Überblendung in die Zielfarben
+    private val introColors: IntArray = TWO_STAGE_INTRO_COLORS.map { it.toInt() }.toIntArray()
+    private var introPending: Boolean = false
+    private var introStartNanos: Long = 0L
+    private var activeColors: IntArray = intArrayOf()
+    private var introSweep: SweepGradient? = null
+
     // Animationszustand
     private var travel: Float = 0f          // 0..1 Position entlang des Umfangs
     private var pulsePhase: Float = 0f      // 0..1
@@ -96,6 +104,13 @@ class EdgeLightRenderer {
         private const val RUNNING_STOPS = 7
         private const val MAX_STOPS = 96
         private const val CALLER_PULSE_HZ = 1.4f
+        private const val INTRO_HOLD_S = 0.9f   // Stufe 1: Spektrum stehen lassen
+        private const val INTRO_BLEND_S = 1.1f  // Stufe 2: weich in Zielfarben überblenden
+    }
+
+    /** Spielt den Zwei-Stufen-Start beim nächsten Frame ab. */
+    fun startIntro() {
+        introPending = true
     }
 
     fun updateDimensions(newWidth: Float, newHeight: Float, config: EdgeConfig) {
@@ -117,6 +132,7 @@ class EdgeLightRenderer {
         }
         val closed = if (raw.first() != raw.last()) raw + raw.first() else raw
         paletteColors = closed.map { it.toInt() }.toIntArray()
+        activeColors = paletteColors
         cachedPaletteId = config.selectedPaletteId
         cachedUseCustomColors = config.useCustomColors
         cachedCustomColors = config.customColors
@@ -135,13 +151,47 @@ class EdgeLightRenderer {
 
     /** Palettenfarbe an Position u (0..1) im geschlossenen Verlauf, linear interpoliert. */
     private fun paletteAt(u: Float): Int {
-        val c = paletteColors
+        val c = activeColors
         if (c.isEmpty()) return 0xFF00E5FF.toInt()
         if (c.size == 1) return c[0]
         val x = (((u % 1f) + 1f) % 1f) * (c.size - 1)
         val i = floor(x).toInt().coerceIn(0, c.size - 2)
         val f = x - i
         return lerpColor(c[i], c[i + 1], f)
+    }
+
+    /** Farbe im Intro-Spektrum an Position u (0..1, geschlossen). */
+    private fun introAt(u: Float): Int {
+        val c = introColors
+        val x = (((u % 1f) + 1f) % 1f) * c.size
+        val i = floor(x).toInt() % c.size
+        return lerpColor(c[i], c[(i + 1) % c.size], x - floor(x))
+    }
+
+    /**
+     * Aktualisiert [activeColors] für den Zwei-Stufen-Start. Liefert true, solange das Intro läuft.
+     * Mischung: 0 während der Haltezeit, danach smootherStep → 1.
+     */
+    private fun updateIntro(nowNanos: Long): Boolean {
+        if (introPending) {
+            introPending = false
+            introStartNanos = nowNanos
+        }
+        if (introStartNanos == 0L) return false
+        val elapsed = (nowNanos - introStartNanos) / 1_000_000_000f
+        if (elapsed >= INTRO_HOLD_S + INTRO_BLEND_S) {
+            introStartNanos = 0L
+            activeColors = paletteColors
+            return false
+        }
+        val mix = PulseMath.smootherStep((elapsed - INTRO_HOLD_S) / INTRO_BLEND_S)
+        val n = paletteColors.size
+        activeColors = IntArray(n) { i ->
+            val u = if (n > 1) i.toFloat() / (n - 1) else 0f
+            lerpColor(introAt(u), paletteColors[i], mix)
+        }
+        introSweep = SweepGradient(cx, cy, activeColors, null)
+        return true
     }
 
     private fun lerpColor(a: Int, b: Int, f: Float): Int {
@@ -386,12 +436,15 @@ class EdgeLightRenderer {
         val thickness = if (alert) config.borderThickness * 1.3f else config.borderThickness
         val reach = config.glowReach.coerceIn(10f, 600f)
 
+        val introRunning = updateIntro(nowNanos)
+
         // Farb-/Maskenverlauf für diesen Frame wählen
         val shader: SweepGradient = when (config.lineStyle) {
             LineStyle.RING, LineStyle.AURA -> {
+                val sweep = (if (introRunning) introSweep else ringSweep) ?: return
                 gradientMatrix.setRotate(travel * 360f, cx, cy)
-                ringSweep?.setLocalMatrix(gradientMatrix)
-                ringSweep ?: return
+                sweep.setLocalMatrix(gradientMatrix)
+                sweep
             }
             LineStyle.COMET -> cometShader(travel, config.tailLength, 1)
             LineStyle.DUAL_COMET -> cometShader(travel, config.tailLength.coerceAtMost(0.45f), 2)

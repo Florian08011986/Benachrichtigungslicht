@@ -176,6 +176,19 @@ class EdgeDashboardViewModel(application: Application) : AndroidViewModel(applic
         setPreviewActive(enabled)
     }
 
+    fun setTwoStageStartEnabled(enabled: Boolean) {
+        repository.updateTwoStageStartEnabled(enabled)
+        if (enabled) replayIntro()
+    }
+
+    /** Spielt den Zwei-Stufen-Start sofort am echten Display ab (Live-Vorschau muss sichtbar sein). */
+    fun replayIntro() {
+        val context = getApplication<Application>()
+        if (!canDrawOverlays()) return
+        EdgeOverlayService.startOverlay(context)
+        repository.requestIntroReplay()
+    }
+
     fun setProcessingPulseEnabled(enabled: Boolean) {
         repository.updateProcessingPulseEnabled(enabled)
     }

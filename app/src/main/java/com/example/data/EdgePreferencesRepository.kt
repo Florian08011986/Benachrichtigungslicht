@@ -41,7 +41,8 @@ private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(na
 data class OverlayRuntimeState(
     val previewActive: Boolean = false,
     val processingActive: Boolean = false,
-    val processingTestActive: Boolean = false
+    val processingTestActive: Boolean = false,
+    val introNonce: Long = 0L // jede Erhöhung spielt den Zwei-Stufen-Start einmal ab
 )
 
 class EdgePreferencesRepository private constructor(context: Context) {
@@ -73,6 +74,30 @@ class EdgePreferencesRepository private constructor(context: Context) {
         _runtimeState.value = _runtimeState.value.copy(processingTestActive = active)
     }
 
+    fun requestIntroReplay() {
+        _runtimeState.value = _runtimeState.value.copy(introNonce = _runtimeState.value.introNonce + 1)
+    }
+
+    // Benachrichtigungen, deren Licht bis zum Wegwischen läuft (Schlüssel = StatusBarNotification.key)
+    private val pendingAlertKeys = mutableSetOf<String>()
+
+    @Synchronized
+    fun addPendingAlertKey(key: String) {
+        pendingAlertKeys.add(key)
+    }
+
+    /** Entfernt den Schlüssel; liefert true, wenn danach keine offene Benachrichtigung mehr leuchten soll. */
+    @Synchronized
+    fun removePendingAlertKey(key: String): Boolean {
+        val removed = pendingAlertKeys.remove(key)
+        return removed && pendingAlertKeys.isEmpty()
+    }
+
+    @Synchronized
+    fun clearPendingAlertKeys() {
+        pendingAlertKeys.clear()
+    }
+
     object Keys {
         val OVERLAY_ENABLED = booleanPreferencesKey("overlay_enabled")
         val CALLER_ID_ENABLED = booleanPreferencesKey("caller_id_enabled")
@@ -100,12 +125,14 @@ class EdgePreferencesRepository private constructor(context: Context) {
         val PULSE_SPEED = floatPreferencesKey("pulse_speed")
         val LIVE_PREVIEW_ENABLED = booleanPreferencesKey("live_preview_enabled")
         val PROCESSING_PULSE_ENABLED = booleanPreferencesKey("processing_pulse_enabled")
+        val TWO_STAGE_START = booleanPreferencesKey("two_stage_start")
 
         // Notification Edge Light Keys
         val NOTIF_ALERT_ENABLED = booleanPreferencesKey("notif_alert_enabled")
         val NOTIF_WAKE_SCREEN = booleanPreferencesKey("notif_wake_screen")
         val NOTIF_DURATION = intPreferencesKey("notif_duration")
         val NOTIF_ONLY_SCREEN_OFF = booleanPreferencesKey("notif_only_screen_off")
+        val NOTIF_UNTIL_DISMISSED = booleanPreferencesKey("notif_until_dismissed")
         val APP_RULES_RAW = stringPreferencesKey("app_rules_raw")
         val CONTACT_RULES_RAW = stringPreferencesKey("contact_rules_raw")
 
@@ -172,6 +199,7 @@ class EdgePreferencesRepository private constructor(context: Context) {
                 pulseStrength = prefs[Keys.PULSE_STRENGTH] ?: 0.6f,
                 isLivePreviewEnabled = prefs[Keys.LIVE_PREVIEW_ENABLED] ?: true,
                 isProcessingPulseEnabled = prefs[Keys.PROCESSING_PULSE_ENABLED] ?: false,
+                isTwoStageStartEnabled = prefs[Keys.TWO_STAGE_START] ?: false,
                 cornerRadiusTop = prefs[Keys.CORNER_RADIUS_TOP] ?: 70f,
                 cornerRadiusBottom = prefs[Keys.CORNER_RADIUS_BOTTOM] ?: 70f,
                 notchConfig = notchConfig,
@@ -190,7 +218,8 @@ class EdgePreferencesRepository private constructor(context: Context) {
                 isNotificationAlertEnabled = prefs[Keys.NOTIF_ALERT_ENABLED] ?: true,
                 wakeScreenOnNotification = prefs[Keys.NOTIF_WAKE_SCREEN] ?: true,
                 defaultAlertDurationSeconds = prefs[Keys.NOTIF_DURATION] ?: 6,
-                onlyWhenScreenOff = prefs[Keys.NOTIF_ONLY_SCREEN_OFF] ?: false
+                onlyWhenScreenOff = prefs[Keys.NOTIF_ONLY_SCREEN_OFF] ?: false,
+                pulseUntilDismissed = prefs[Keys.NOTIF_UNTIL_DISMISSED] ?: false
             )
         }.stateIn(
             scope = scope,
@@ -382,6 +411,12 @@ class EdgePreferencesRepository private constructor(context: Context) {
         }
     }
 
+    fun updateTwoStageStartEnabled(enabled: Boolean) {
+        scope.launch {
+            applicationContext.dataStore.edit { it[Keys.TWO_STAGE_START] = enabled }
+        }
+    }
+
     fun updateProcessingPulseEnabled(enabled: Boolean) {
         scope.launch {
             applicationContext.dataStore.edit { it[Keys.PROCESSING_PULSE_ENABLED] = enabled }
@@ -408,6 +443,7 @@ class EdgePreferencesRepository private constructor(context: Context) {
                 prefs[Keys.NOTIF_WAKE_SCREEN] = settings.wakeScreenOnNotification
                 prefs[Keys.NOTIF_DURATION] = settings.defaultAlertDurationSeconds
                 prefs[Keys.NOTIF_ONLY_SCREEN_OFF] = settings.onlyWhenScreenOff
+                prefs[Keys.NOTIF_UNTIL_DISMISSED] = settings.pulseUntilDismissed
             }
         }
     }

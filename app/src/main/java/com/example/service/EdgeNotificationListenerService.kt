@@ -24,6 +24,10 @@ class EdgeNotificationListenerService : NotificationListenerService() {
     override fun onNotificationRemoved(sbn: StatusBarNotification?) {
         super.onNotificationRemoved(sbn)
         refreshProcessingState()
+        // „Bis gelesen“: Licht endet, sobald keine leuchtende Benachrichtigung mehr offen ist
+        if (sbn != null && repository.removePendingAlertKey(sbn.key)) {
+            EdgeOverlayService.clearNotificationAlert(applicationContext)
+        }
     }
 
     /** Ein Vorgang läuft, sobald eine fremde App eine Benachrichtigung mit Fortschrittsanzeige zeigt. */
@@ -81,6 +85,11 @@ class EdgeNotificationListenerService : NotificationListenerService() {
             ?: ""
         val text = extras?.getCharSequence(Notification.EXTRA_TEXT)?.toString() ?: ""
 
+        // „Bis gelesen“: Dauer 0 = bis zum Wegwischen; Schlüssel merken
+        val untilDismissed = notifSettings.pulseUntilDismissed
+        if (untilDismissed) repository.addPendingAlertKey(sbn.key)
+        fun duration(seconds: Int) = if (untilDismissed) EdgeOverlayService.DURATION_UNTIL_DISMISSED else seconds
+
         val contactRules = repository.contactRulesFlow.value
         val appRules = repository.appRulesFlow.value
         val baseConfig = repository.configFlow.value
@@ -99,7 +108,7 @@ class EdgeNotificationListenerService : NotificationListenerService() {
                 useCustomColors = matchedContact.useCustomColors,
                 customColorsCsv = matchedContact.customColors.joinToString(","),
                 lineStyle = matchedContact.lineStyle.name,
-                durationSeconds = matchedContact.durationSeconds,
+                durationSeconds = duration(matchedContact.durationSeconds),
                 wakeScreen = notifSettings.wakeScreenOnNotification
             )
             return
@@ -117,7 +126,7 @@ class EdgeNotificationListenerService : NotificationListenerService() {
                 useCustomColors = matchedApp.useCustomColors,
                 customColorsCsv = matchedApp.customColors.joinToString(","),
                 lineStyle = matchedApp.lineStyle.name,
-                durationSeconds = matchedApp.durationSeconds,
+                durationSeconds = duration(matchedApp.durationSeconds),
                 wakeScreen = notifSettings.wakeScreenOnNotification
             )
             return
@@ -130,7 +139,7 @@ class EdgeNotificationListenerService : NotificationListenerService() {
             useCustomColors = baseConfig.useCustomColors,
             customColorsCsv = baseConfig.customColors.joinToString(","),
             lineStyle = baseConfig.lineStyle.name,
-            durationSeconds = notifSettings.defaultAlertDurationSeconds,
+            durationSeconds = duration(notifSettings.defaultAlertDurationSeconds),
             wakeScreen = notifSettings.wakeScreenOnNotification
         )
     }

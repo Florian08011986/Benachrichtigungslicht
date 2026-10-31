@@ -83,6 +83,37 @@ class RenderSnapshotTest {
     }
 
     @Test
+    fun twoStageStart_showsSpectrumFirst_thenTargetColors() {
+        val cfg = EdgeConfig(
+            lineStyle = LineStyle.RING, selectedPaletteId = 48, isGlowEnabled = false,
+            animationMode = AnimationMode.PULSE, isTwoStageStartEnabled = true, borderThickness = 16f
+        )
+        val renderer = EdgeLightRenderer()
+        renderer.updateDimensions(w.toFloat(), h.toFloat(), cfg)
+        renderer.startIntro()
+        fun frameAt(seconds: Float, t0: Long): Bitmap {
+            val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(bmp)
+            canvas.drawColor(Color.rgb(28, 28, 32))
+            renderer.render(canvas, cfg, t0 + (seconds * 1e9f).toLong())
+            return bmp
+        }
+        val t0 = 5_000_000_000L
+        frameAt(0f, t0)                         // Intro beginnt
+        val early = frameAt(0.4f, t0)           // Stufe 1: Spektrum
+        save(early, "intro_stage1")
+        val late = frameAt(2.4f, t0)            // nach Intro: Zielpalette
+        save(late, "intro_done")
+        // Unterschiedliche Farben am selben Randpunkt → Intro hat sichtbar gewirkt
+        var differing = 0
+        for (y in 100 until h - 100 step 50) {
+            if (early.getPixel(4, y) != late.getPixel(4, y)) differing++
+        }
+        println("INTRO differing edge samples: $differing")
+        assertTrue("Intro-Farben unterscheiden sich nicht von Zielfarben", differing >= 5)
+    }
+
+    @Test
     fun opacity100_coversContent() {
         val cfg = EdgeConfig(lineStyle = LineStyle.RING, selectedPaletteId = 48, opacityPercent = 100, borderThickness = 16f, isGlowEnabled = false)
         val bmp = renderFrame(cfg)

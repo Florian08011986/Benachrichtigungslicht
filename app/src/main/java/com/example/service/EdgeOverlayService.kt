@@ -54,6 +54,10 @@ class EdgeOverlayService : Service() {
     private var isTemporaryAlertActive = false
     private var temporaryConfig: EdgeConfig? = null
     private var lastSystemState: SystemState? = null
+    private var lastDisplayKind: DisplayKind = DisplayKind.NONE
+    private var lastIntroNonce: Long = 0L
+
+    private enum class DisplayKind { NONE, NORMAL, PROCESSING, PREVIEW, TEST }
 
     companion object {
         const val CHANNEL_ID = "edge_lighting_overlay_channel"
@@ -64,6 +68,12 @@ class EdgeOverlayService : Service() {
         const val ACTION_TRIGGER_CALLER_ALERT = "com.example.service.ACTION_TRIGGER_CALLER_ALERT"
         const val ACTION_CLEAR_CALLER_ALERT = "com.example.service.ACTION_CLEAR_CALLER_ALERT"
         const val ACTION_SHOW_NOTIF_ALERT = "com.example.service.ACTION_SHOW_NOTIF_ALERT"
+        const val ACTION_CLEAR_NOTIF_ALERT = "com.example.service.ACTION_CLEAR_NOTIF_ALERT"
+
+        /** Dauer 0 = leuchten, bis die Benachrichtigung entfernt wird (Sicherheitsdeckel 60 min). */
+        const val DURATION_UNTIL_DISMISSED = 0
+        private const val UNTIL_DISMISSED_CAP_S = 3600
+        private const val UNTIL_DISMISSED_WAKE_S = 8
 
         const val EXTRA_PALETTE_ID = "extra_palette_id"
         const val EXTRA_USE_CUSTOM_COLORS = "extra_use_custom_colors"
@@ -110,6 +120,14 @@ class EdgeOverlayService : Service() {
                 putExtra(EXTRA_LINE_STYLE, lineStyle)
                 putExtra(EXTRA_DURATION_SECONDS, durationSeconds)
                 putExtra(EXTRA_WAKE_SCREEN, wakeScreen)
+            }
+            startServiceCompat(context, intent)
+        }
+
+        /** Beendet ein „bis gelesen“-Licht, sobald keine passende Benachrichtigung mehr offen ist. */
+        fun clearNotificationAlert(context: Context) {
+            val intent = Intent(context, EdgeOverlayService::class.java).apply {
+                action = ACTION_CLEAR_NOTIF_ALERT
             }
             startServiceCompat(context, intent)
         }
@@ -163,6 +181,12 @@ class EdgeOverlayService : Service() {
                     handleNotificationAlert(intent)
                 }
             }
+            ACTION_CLEAR_NOTIF_ALERT -> {
+                if (isTemporaryAlertActive) {
+                    notifAlertJob?.cancel()
+                    endNotificationAlert()
+                }
+            }
             ACTION_START -> {
                 ensureOverlayAttached()
             }
@@ -180,7 +204,9 @@ class EdgeOverlayService : Service() {
         val useCustom = intent.getBooleanExtra(EXTRA_USE_CUSTOM_COLORS, false)
         val customColorsCsv = intent.getStringExtra(EXTRA_CUSTOM_COLORS_CSV) ?: ""
         val styleName = intent.getStringExtra(EXTRA_LINE_STYLE) ?: LineStyle.RING.name
-        val durationSeconds = intent.getIntExtra(EXTRA_DURATION_SECONDS, 6).coerceIn(2, 30)
+        val requested = intent.getIntExtra(EXTRA_DURATION_SECONDS, 6)
+        val untilDismissed = requested == DURATION_UNTIL_DISMISSED
+        val durationSeconds = if (untilDismissed) UNTIL_DISMISSED_CAP_S else requested.coerceIn(2, 30)
         val wakeScreen = intent.getBooleanExtra(EXTRA_WAKE_SCREEN, true)
 
         val customColors = customColorsCsv.split(",")
@@ -200,28 +226,36 @@ class EdgeOverlayService : Service() {
         isTemporaryAlertActive = true
 
         if (wakeScreen) {
-            acquireWakeLock(durationSeconds)
+            // Bildschirm nur kurz wecken – auch wenn das Licht bis zum Wegwischen läuft (Akku)
+            acquireWakeLock(if (untilDismissed) UNTIL_DISMISSED_WAKE_S else durationSeconds)
         }
 
         ensureOverlayAttached()
         overlayView?.updateConfig(temporaryConfig ?: baseConfig)
+        if (baseConfig.isTwoStageStartEnabled) overlayView?.startIntro()
 
         notifAlertJob?.cancel()
         notifAlertJob = serviceScope.launch {
             delay(durationSeconds * 1000L)
-            isTemporaryAlertActive = false
-            temporaryConfig = null
-            releaseWakeLock()
+            if (untilDismissed) repository.clearPendingAlertKeys()
+            endNotificationAlert()
+        }
+    }
 
-            // Zurück zum Grundzustand (Dauerlicht, Live-Vorschau oder Verarbeitungs-Puls bleiben erhalten)
-            val state = lastSystemState
-            if (state != null) {
-                applySystemState(state)
-            } else {
-                removeOverlay()
-                stopForeground(STOP_FOREGROUND_REMOVE)
-                stopSelf()
-            }
+    /** Beendet den Benachrichtigungs-Alarm und kehrt zum Grundzustand zurück. */
+    private fun endNotificationAlert() {
+        isTemporaryAlertActive = false
+        temporaryConfig = null
+        releaseWakeLock()
+
+        // Zurück zum Grundzustand (Dauerlicht, Live-Vorschau oder Verarbeitungs-Puls bleiben erhalten)
+        val state = lastSystemState
+        if (state != null) {
+            applySystemState(state)
+        } else {
+            removeOverlay()
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf()
         }
     }
 
@@ -352,13 +386,20 @@ class EdgeOverlayService : Service() {
                 (runtime.processingActive && state.config.isProcessingPulseEnabled && !isDnd)
         val normalShown = (state.config.isOverlayEnabled || state.config.isCallerAlertActive) && !isDnd
 
-        val displayConfig: EdgeConfig? = when {
-            runtime.processingTestActive -> processingConfig(state.config)
-            runtime.previewActive -> state.config
-            processingShown -> processingConfig(state.config)
-            normalShown -> state.config
-            else -> null
+        val kind = when {
+            runtime.processingTestActive -> DisplayKind.TEST
+            runtime.previewActive -> DisplayKind.PREVIEW
+            processingShown -> DisplayKind.PROCESSING
+            normalShown -> DisplayKind.NORMAL
+            else -> DisplayKind.NONE
         }
+        val displayConfig: EdgeConfig? = when (kind) {
+            DisplayKind.TEST, DisplayKind.PROCESSING -> processingConfig(state.config)
+            DisplayKind.PREVIEW, DisplayKind.NORMAL -> state.config
+            DisplayKind.NONE -> null
+        }
+        val kindChanged = kind != lastDisplayKind
+        lastDisplayKind = kind
 
         if (displayConfig == null) {
             removeOverlay()
@@ -377,6 +418,13 @@ class EdgeOverlayService : Service() {
             disableGlow = state.batterySaver.disableGlowFilter
         )
         overlayView?.updateConfig(displayConfig)
+
+        // Zwei-Stufen-Start: bei neuem Anzeigegrund (z. B. Vorgang beginnt) oder auf Wunsch („Ansehen“)
+        val replayRequested = runtime.introNonce != lastIntroNonce
+        lastIntroNonce = runtime.introNonce
+        if (replayRequested || (kindChanged && kind != DisplayKind.PREVIEW && state.config.isTwoStageStartEnabled)) {
+            overlayView?.startIntro()
+        }
     }
 
     /** Blaues, atmendes Leuchten für laufende Vorgänge – Geometrie & Pulsgeschwindigkeit vom Nutzer. */
@@ -492,6 +540,11 @@ class EdgeOverlayView(context: Context) : View(context) {
         if (changed) {
             postInvalidateOnAnimation()
         }
+    }
+
+    fun startIntro() {
+        renderer.startIntro()
+        postInvalidateOnAnimation()
     }
 
     fun updateConfig(newConfig: EdgeConfig) {
