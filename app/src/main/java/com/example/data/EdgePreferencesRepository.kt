@@ -9,6 +9,7 @@ import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.example.model.AnimationMode
 import com.example.model.AppEdgeRule
 import com.example.model.BatterySaverConfig
 import com.example.model.BorderShapeType
@@ -34,6 +35,13 @@ import java.util.UUID
 
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "edge_lighting_preferences")
 
+/** Flüchtiger Overlay-Status: Live-Vorschau (App im Vordergrund) und laufende Vorgänge. */
+data class OverlayRuntimeState(
+    val previewActive: Boolean = false,
+    val processingActive: Boolean = false,
+    val processingTestActive: Boolean = false
+)
+
 class EdgePreferencesRepository private constructor(context: Context) {
 
     private val applicationContext = context.applicationContext
@@ -45,6 +53,22 @@ class EdgePreferencesRepository private constructor(context: Context) {
 
     fun setCallerAlertActive(active: Boolean) {
         _callerAlertActive.value = active
+    }
+
+    // Flüchtiger Laufzeitstatus (nicht persistiert): Live-Vorschau & Verarbeitungs-Puls
+    private val _runtimeState = MutableStateFlow(OverlayRuntimeState())
+    val runtimeState: StateFlow<OverlayRuntimeState> = _runtimeState.asStateFlow()
+
+    fun setPreviewActive(active: Boolean) {
+        _runtimeState.value = _runtimeState.value.copy(previewActive = active)
+    }
+
+    fun setProcessingActive(active: Boolean) {
+        _runtimeState.value = _runtimeState.value.copy(processingActive = active)
+    }
+
+    fun setProcessingTestActive(active: Boolean) {
+        _runtimeState.value = _runtimeState.value.copy(processingTestActive = active)
     }
 
     object Keys {
@@ -69,6 +93,10 @@ class EdgePreferencesRepository private constructor(context: Context) {
         val NOTCH_RADIUS = floatPreferencesKey("notch_radius")
         val GLOW_ENABLED = booleanPreferencesKey("glow_enabled")
         val BRIGHTNESS_PERCENT = intPreferencesKey("brightness_percent")
+        val ANIMATION_MODE = stringPreferencesKey("animation_mode")
+        val PULSE_SPEED = floatPreferencesKey("pulse_speed")
+        val LIVE_PREVIEW_ENABLED = booleanPreferencesKey("live_preview_enabled")
+        val PROCESSING_PULSE_ENABLED = booleanPreferencesKey("processing_pulse_enabled")
 
         // Notification Edge Light Keys
         val NOTIF_ALERT_ENABLED = booleanPreferencesKey("notif_alert_enabled")
@@ -136,6 +164,14 @@ class EdgePreferencesRepository private constructor(context: Context) {
                 shapeSpacing = prefs[Keys.SHAPE_SPACING] ?: 42f,
                 borderThickness = prefs[Keys.BORDER_THICKNESS] ?: 18f,
                 animationSpeed = prefs[Keys.ANIMATION_SPEED] ?: 5f,
+                animationMode = try {
+                    AnimationMode.valueOf(prefs[Keys.ANIMATION_MODE] ?: AnimationMode.ROTATE.name)
+                } catch (_: Exception) {
+                    AnimationMode.ROTATE
+                },
+                pulseSpeed = prefs[Keys.PULSE_SPEED] ?: 0.5f,
+                isLivePreviewEnabled = prefs[Keys.LIVE_PREVIEW_ENABLED] ?: true,
+                isProcessingPulseEnabled = prefs[Keys.PROCESSING_PULSE_ENABLED] ?: false,
                 cornerRadiusTop = prefs[Keys.CORNER_RADIUS_TOP] ?: 70f,
                 cornerRadiusBottom = prefs[Keys.CORNER_RADIUS_BOTTOM] ?: 70f,
                 notchConfig = notchConfig,
@@ -308,6 +344,30 @@ class EdgePreferencesRepository private constructor(context: Context) {
                 cornerRadiusBottom?.let { prefs[Keys.CORNER_RADIUS_BOTTOM] = it }
                 glowEnabled?.let { prefs[Keys.GLOW_ENABLED] = it }
             }
+        }
+    }
+
+    fun updateMotion(
+        animationMode: AnimationMode? = null,
+        pulseSpeed: Float? = null
+    ) {
+        scope.launch {
+            applicationContext.dataStore.edit { prefs ->
+                animationMode?.let { prefs[Keys.ANIMATION_MODE] = it.name }
+                pulseSpeed?.let { prefs[Keys.PULSE_SPEED] = it }
+            }
+        }
+    }
+
+    fun updateLivePreviewEnabled(enabled: Boolean) {
+        scope.launch {
+            applicationContext.dataStore.edit { it[Keys.LIVE_PREVIEW_ENABLED] = enabled }
+        }
+    }
+
+    fun updateProcessingPulseEnabled(enabled: Boolean) {
+        scope.launch {
+            applicationContext.dataStore.edit { it[Keys.PROCESSING_PULSE_ENABLED] = enabled }
         }
     }
 

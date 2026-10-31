@@ -104,7 +104,9 @@ import com.example.ui.components.AppRuleCard
 import com.example.ui.components.ColorPresetItem
 import com.example.ui.components.ContactRuleCard
 import com.example.ui.components.CustomColorEditor
-import com.example.ui.components.EdgeScreenPreview
+import com.example.ui.components.LivePreviewCard
+import com.example.model.AnimationMode
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import com.example.ui.theme.DarkBorder
 import com.example.ui.theme.DarkOledBg
 import com.example.ui.theme.DarkSurface
@@ -185,6 +187,12 @@ fun EdgeDashboardScreen(
     val hasNotifAccess = viewModel.isNotificationListenerEnabled()
     val hasOverlayAccess = Settings.canDrawOverlays(context)
 
+    // Live-Vorschau nur solange die App im Vordergrund ist
+    LifecycleResumeEffect(config.isLivePreviewEnabled) {
+        if (config.isLivePreviewEnabled) viewModel.setPreviewActive(true)
+        onPauseOrDispose { viewModel.setPreviewActive(false) }
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -238,9 +246,18 @@ fun EdgeDashboardScreen(
             contentPadding = PaddingValues(bottom = 32.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Live-Vorschau Karte
+            // Live-Vorschau am echten Display (ersetzt Mini-Handy)
             item {
-                EdgeScreenPreview(config = config)
+                LivePreviewCard(
+                    livePreviewEnabled = config.isLivePreviewEnabled,
+                    hasOverlayAccess = hasOverlayAccess,
+                    onToggle = { viewModel.setLivePreviewEnabled(it) },
+                    onRequestOverlayAccess = {
+                        overlayPermissionLauncher.launch(
+                            Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${context.packageName}"))
+                        )
+                    }
+                )
             }
 
             // Status- & Berechtigungs-Banner
@@ -651,16 +668,63 @@ fun EdgeDashboardScreen(
                                 colors = SliderDefaults.colors(thumbColor = NeonCyan, activeTrackColor = NeonCyan)
                             )
 
+                            // Bewegungsart: Drehen / Pulsieren / beides
                             Text(
-                                text = "Animationsgeschwindigkeit: ${String.format("%.1f", config.animationSpeed)}x",
+                                text = "Bewegung",
                                 color = TextPrimary,
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            FlowRow(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                AnimationMode.entries.forEach { mode ->
+                                    FilterChip(
+                                        selected = config.animationMode == mode,
+                                        onClick = { viewModel.updateMotion(animationMode = mode) },
+                                        label = { Text(mode.displayName) },
+                                        colors = FilterChipDefaults.filterChipColors(
+                                            selectedContainerColor = ElectricPurple,
+                                            selectedLabelColor = TextPrimary,
+                                            labelColor = TextSecondary
+                                        ),
+                                        modifier = Modifier.testTag("motion_mode_${mode.name}")
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            val rotationEnabled = config.animationMode != AnimationMode.PULSE
+                            Text(
+                                text = "Drehgeschwindigkeit: ${String.format("%.1f", config.animationSpeed)}x" +
+                                        "  (eine Runde in ${String.format("%.1f", 10f / config.animationSpeed)} s)",
+                                color = if (rotationEnabled) TextPrimary else TextMuted,
                                 style = MaterialTheme.typography.bodyMedium
                             )
                             Slider(
-                                value = config.animationSpeed,
+                                value = config.animationSpeed.coerceIn(0.2f, 20f),
                                 onValueChange = { viewModel.updateGeometry(animationSpeed = it) },
-                                valueRange = 1f..20f,
-                                colors = SliderDefaults.colors(thumbColor = ElectricPurple, activeTrackColor = ElectricPurple)
+                                valueRange = 0.2f..20f,
+                                enabled = rotationEnabled,
+                                colors = SliderDefaults.colors(thumbColor = ElectricPurple, activeTrackColor = ElectricPurple),
+                                modifier = Modifier.testTag("rotation_speed_slider")
+                            )
+
+                            val pulseEnabled = config.animationMode != AnimationMode.ROTATE
+                            Text(
+                                text = "Pulsgeschwindigkeit: ein Atemzug alle ${String.format("%.1f", 1f / config.pulseSpeed)} s",
+                                color = if (pulseEnabled) TextPrimary else TextMuted,
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                            Slider(
+                                value = config.pulseSpeed.coerceIn(0.125f, 2f),
+                                onValueChange = { viewModel.updateMotion(pulseSpeed = it) },
+                                valueRange = 0.125f..2f,
+                                enabled = pulseEnabled,
+                                colors = SliderDefaults.colors(thumbColor = NeonCyan, activeTrackColor = NeonCyan),
+                                modifier = Modifier.testTag("pulse_speed_slider")
                             )
 
                             Text(
@@ -982,6 +1046,73 @@ fun EdgeDashboardScreen(
                                 valueRange = 2f..20f,
                                 colors = SliderDefaults.colors(thumbColor = NeonCyan, activeTrackColor = NeonCyan)
                             )
+                        }
+                    }
+                }
+
+                // Blaues Pulsieren bei laufenden Vorgängen
+                item {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(20.dp),
+                        colors = CardDefaults.cardColors(containerColor = DarkSurface),
+                        border = CardDefaults.outlinedCardBorder()
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "Blaues Pulsieren bei laufenden Vorgängen",
+                                        color = TextPrimary,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    Text(
+                                        text = "Der Rand atmet blau, solange eine App einen Fortschritt anzeigt – z. B. Download, Upload, Backup, Export oder Installation.",
+                                        color = TextSecondary,
+                                        style = MaterialTheme.typography.bodySmall
+                                    )
+                                }
+                                Switch(
+                                    checked = config.isProcessingPulseEnabled,
+                                    onCheckedChange = { viewModel.setProcessingPulseEnabled(it) },
+                                    colors = SwitchDefaults.colors(
+                                        checkedThumbColor = Color(0xFF1E6BFF),
+                                        checkedTrackColor = DarkSurfaceVariant
+                                    ),
+                                    modifier = Modifier.testTag("processing_pulse_switch")
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "Tempo folgt der Pulsgeschwindigkeit unter „3. Geometrie & Helligkeit“. Benötigt Benachrichtigungszugriff.",
+                                color = TextMuted,
+                                style = MaterialTheme.typography.labelSmall
+                            )
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Button(
+                                onClick = {
+                                    if (!Settings.canDrawOverlays(context)) {
+                                        overlayPermissionLauncher.launch(
+                                            Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${context.packageName}"))
+                                        )
+                                    } else {
+                                        viewModel.testProcessingPulse(8L)
+                                        Toast.makeText(context, "Verarbeitungs-Puls: 8 Sekunden Test", Toast.LENGTH_SHORT).show()
+                                    }
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E6BFF), contentColor = Color.White),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("processing_pulse_test")
+                            ) {
+                                Icon(Icons.Default.PlayArrow, contentDescription = null)
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Puls jetzt testen", fontWeight = FontWeight.Bold)
+                            }
                         }
                     }
                 }

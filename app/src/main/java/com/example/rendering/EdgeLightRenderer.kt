@@ -8,6 +8,7 @@ import android.graphics.Path
 import android.graphics.PathMeasure
 import android.graphics.Rect
 import android.graphics.SweepGradient
+import com.example.model.AnimationMode
 import com.example.model.BorderShapeType
 import com.example.model.EdgeColorPalette
 import com.example.model.EdgeConfig
@@ -70,6 +71,9 @@ class EdgeLightRenderer {
     // Animation State
     private var currentRotationAngle: Float = 0f
     private var lastRenderTimeNanos: Long = 0L
+    private var pulsePhase: Float = 0f          // 0..1 (ein voller Atemzyklus)
+    private var pulseLevel: Float = 1f          // 0..1, aktueller Puls-Pegel (1 = voll)
+    private var cachedBlurRadius: Float = -1f
 
     // Cached configuration to detect changes
     private var cachedPaletteId: Int = -1
@@ -324,10 +328,23 @@ class EdgeLightRenderer {
         val deltaSeconds = ((nowNanos - lastRenderTimeNanos) / 1_000_000_000f).coerceIn(0.001f, 0.1f)
         lastRenderTimeNanos = nowNanos
 
+        val rotates = config.animationMode != AnimationMode.PULSE
+        val pulses = config.animationMode != AnimationMode.ROTATE
+
         // Caller alert boosts speed and intensity
-        val speedMultiplier = if (config.isCallerAlertActive) config.animationSpeed * 2.5f else config.animationSpeed
-        val degreesPerSecond = 36f * speedMultiplier
-        currentRotationAngle = (currentRotationAngle + degreesPerSecond * deltaSeconds) % 360f
+        if (rotates) {
+            val speedMultiplier = if (config.isCallerAlertActive) config.animationSpeed * 2.5f else config.animationSpeed
+            val degreesPerSecond = 36f * speedMultiplier
+            currentRotationAngle = (currentRotationAngle + degreesPerSecond * deltaSeconds) % 360f
+        }
+
+        // Atmendes Pulsieren: weicher Kosinus-Verlauf 0 → 1 → 0
+        pulseLevel = if (pulses) {
+            pulsePhase = (pulsePhase + config.pulseSpeed.coerceIn(0.05f, 4f) * deltaSeconds) % 1f
+            (0.5f - 0.5f * cos(2.0 * PI * pulsePhase)).toFloat()
+        } else {
+            1f
+        }
 
         // Rotate sweep gradient
         matrix.reset()
@@ -341,12 +358,26 @@ class EdgeLightRenderer {
         } else {
             255
         }
-        val alertAlpha = (baseAlpha * userBrightness * batteryDimMultiplier.coerceIn(0.1f, 1.0f)).toInt().coerceIn(15, 255)
+        // Puls moduliert die Deckkraft zwischen 25 % und 100 %
+        val pulseAlphaFactor = 0.25f + 0.75f * pulseLevel
+        val alertAlpha = (baseAlpha * userBrightness * batteryDimMultiplier.coerceIn(0.1f, 1.0f) * pulseAlphaFactor)
+            .toInt().coerceIn(15, 255)
 
         if (config.shapeType == BorderShapeType.CONTINUOUS_LINE) {
-            renderContinuousLine(canvas, config, alertAlpha, disableGlow)
+            renderContinuousLine(canvas, config, alertAlpha, disableGlow, pulses)
         } else {
             renderBorderShapes(canvas, config, alertAlpha)
+        }
+    }
+
+    private fun applyGlowBlur(radius: Float) {
+        // BlurMaskFilter nur bei spürbarer Radiusänderung neu erzeugen (spart Allokationen pro Frame)
+        if (kotlin.math.abs(radius - cachedBlurRadius) < 0.75f) return
+        cachedBlurRadius = radius
+        glowPaint.maskFilter = try {
+            BlurMaskFilter(radius.coerceAtLeast(1f), BlurMaskFilter.Blur.NORMAL)
+        } catch (_: Exception) {
+            null // Hardware acceleration fallback
         }
     }
 
@@ -354,19 +385,23 @@ class EdgeLightRenderer {
         canvas: Canvas,
         config: EdgeConfig,
         alpha: Int,
-        disableGlow: Boolean = false
+        disableGlow: Boolean = false,
+        pulses: Boolean = false
     ) {
         val thickness = if (config.isCallerAlertActive) config.borderThickness * 1.3f else config.borderThickness
 
         // Optional outer neon glow effect (suppressed in battery saving mode)
         if (config.isGlowEnabled && !disableGlow) {
-            glowPaint.strokeWidth = thickness * 1.8f
-            glowPaint.alpha = (alpha * 0.45f).toInt()
-            try {
-                glowPaint.maskFilter = BlurMaskFilter(thickness * 0.45f, BlurMaskFilter.Blur.NORMAL)
-            } catch (_: Exception) {
-                // Hardware acceleration fallback
-                glowPaint.maskFilter = null
+            if (pulses) {
+                // Pulsieren: Aura atmet nach innen auf (Breite 1.8x → 4.5x, Unschärfe wächst mit)
+                val glowWidth = thickness * (1.8f + 2.7f * pulseLevel)
+                glowPaint.strokeWidth = glowWidth
+                glowPaint.alpha = (alpha * (0.35f + 0.35f * pulseLevel)).toInt().coerceIn(0, 255)
+                applyGlowBlur(glowWidth * 0.3f)
+            } else {
+                glowPaint.strokeWidth = thickness * 1.8f
+                glowPaint.alpha = (alpha * 0.45f).toInt()
+                applyGlowBlur(thickness * 0.45f)
             }
             canvas.drawPath(combinedPath, glowPaint)
         }

@@ -17,12 +17,49 @@ class EdgeNotificationListenerService : NotificationListenerService() {
         repository = EdgePreferencesRepository.getInstance(applicationContext)
     }
 
+    override fun onListenerConnected() {
+        super.onListenerConnected()
+        refreshProcessingState()
+    }
+
+    override fun onNotificationRemoved(sbn: StatusBarNotification?) {
+        super.onNotificationRemoved(sbn)
+        refreshProcessingState()
+    }
+
+    /** Ein Vorgang läuft, sobald eine fremde App eine Benachrichtigung mit Fortschrittsanzeige zeigt. */
+    private fun isProcessingNotification(sbn: StatusBarNotification): Boolean {
+        if (sbn.packageName == packageName) return false
+        val extras = sbn.notification?.extras ?: return false
+        val indeterminate = extras.getBoolean(Notification.EXTRA_PROGRESS_INDETERMINATE, false)
+        val max = extras.getInt(Notification.EXTRA_PROGRESS_MAX, 0)
+        val progress = extras.getInt(Notification.EXTRA_PROGRESS, 0)
+        return indeterminate || (max > 0 && progress < max)
+    }
+
+    private fun refreshProcessingState() {
+        val active = try {
+            activeNotifications?.any { isProcessingNotification(it) } ?: false
+        } catch (_: Exception) {
+            false // Listener (noch) nicht verbunden
+        }
+        val wasActive = repository.runtimeState.value.processingActive
+        if (active == wasActive) return
+        repository.setProcessingActive(active)
+        if (active && repository.configFlow.value.isProcessingPulseEnabled) {
+            EdgeOverlayService.startOverlay(applicationContext)
+        }
+    }
+
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
         super.onNotificationPosted(sbn)
         if (sbn == null) return
 
         // Ignore our own ongoing service notification
         if (sbn.packageName == packageName) return
+
+        // Laufende Vorgänge (Fortschrittsbalken) für das blaue Pulsieren auswerten
+        refreshProcessingState()
 
         // Ignore ongoing foreground service notifications (music player, downloads, etc.)
         if (sbn.isOngoing) return

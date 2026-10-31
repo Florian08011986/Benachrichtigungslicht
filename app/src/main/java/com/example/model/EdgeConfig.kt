@@ -20,6 +20,15 @@ enum class NotchType(val displayName: String) {
     PILL_ISLAND("Pille / Dynamische Insel")
 }
 
+enum class AnimationMode(val displayName: String) {
+    ROTATE("Drehen"),
+    PULSE("Pulsieren"),
+    ROTATE_AND_PULSE("Drehen + Pulsieren")
+}
+
+/** Feste Blau-Palette für das „Verarbeitung läuft“-Pulsieren. */
+val PROCESSING_PULSE_COLORS: List<Long> = listOf(0xFF1E6BFFL, 0xFF00C2FFL, 0xFF6A5CFFL)
+
 data class NotchConfig(
     val notchType: NotchType = NotchType.NONE,
     val notchWidth: Float = 160f,       // px in 0..400
@@ -41,7 +50,11 @@ data class EdgeConfig(
     val shapeSize: Float = 36f,         // px
     val shapeSpacing: Float = 42f,      // px between shapes
     val borderThickness: Float = 18f,   // px
-    val animationSpeed: Float = 5f,     // 1f..20f
+    val animationSpeed: Float = 5f,     // 0.2f..20f (Drehgeschwindigkeit, 1x = 36°/s)
+    val animationMode: AnimationMode = AnimationMode.ROTATE,
+    val pulseSpeed: Float = 0.5f,       // Pulse pro Sekunde, 0.125f..2f
+    val isLivePreviewEnabled: Boolean = true,
+    val isProcessingPulseEnabled: Boolean = false,
     val cornerRadiusTop: Float = 70f,   // px
     val cornerRadiusBottom: Float = 70f,// px
     val notchConfig: NotchConfig = NotchConfig(),

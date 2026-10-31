@@ -4,7 +4,9 @@ import android.app.Application
 import android.provider.Settings
 import androidx.core.app.NotificationManagerCompat
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
 import com.example.data.EdgePreferencesRepository
+import com.example.model.AnimationMode
 import com.example.model.AppEdgeRule
 import com.example.model.BatterySaverConfig
 import com.example.model.BatteryStatus
@@ -17,7 +19,9 @@ import com.example.model.NotificationEdgeSettings
 import com.example.service.CallerIdMonitorService
 import com.example.service.EdgeOverlayService
 import com.example.util.BatteryMonitor
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
 
 class EdgeDashboardViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -35,6 +39,7 @@ class EdgeDashboardViewModel(application: Application) : AndroidViewModel(applic
     override fun onCleared() {
         super.onCleared()
         batteryMonitor.stopListening()
+        repository.setPreviewActive(false)
     }
 
     fun canDrawOverlays(): Boolean {
@@ -144,6 +149,43 @@ class EdgeDashboardViewModel(application: Application) : AndroidViewModel(applic
             cornerRadiusBottom = cornerRadiusBottom,
             glowEnabled = glowEnabled
         )
+    }
+
+    fun updateMotion(animationMode: AnimationMode? = null, pulseSpeed: Float? = null) {
+        repository.updateMotion(animationMode = animationMode, pulseSpeed = pulseSpeed)
+    }
+
+    /** Live-Vorschau am echten Bildschirmrand ein-/ausschalten (nur solange die App sichtbar ist). */
+    fun setPreviewActive(active: Boolean) {
+        val context = getApplication<Application>()
+        if (active) {
+            if (!canDrawOverlays()) return
+            repository.setPreviewActive(true)
+            EdgeOverlayService.startOverlay(context)
+        } else {
+            repository.setPreviewActive(false)
+        }
+    }
+
+    fun setLivePreviewEnabled(enabled: Boolean) {
+        repository.updateLivePreviewEnabled(enabled)
+        setPreviewActive(enabled)
+    }
+
+    fun setProcessingPulseEnabled(enabled: Boolean) {
+        repository.updateProcessingPulseEnabled(enabled)
+    }
+
+    /** Zeigt das blaue Verarbeitungs-Pulsieren für [seconds] Sekunden am echten Display. */
+    fun testProcessingPulse(seconds: Long = 8L) {
+        val context = getApplication<Application>()
+        if (!canDrawOverlays()) return
+        repository.setProcessingTestActive(true)
+        EdgeOverlayService.startOverlay(context)
+        viewModelScope.launch {
+            delay(seconds * 1000L)
+            repository.setProcessingTestActive(false)
+        }
     }
 
     fun updateNotchConfig(notchConfig: NotchConfig) {

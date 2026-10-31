@@ -20,7 +20,10 @@ import androidx.core.app.NotificationCompat
 import com.example.MainActivity
 import com.example.R
 import com.example.data.EdgePreferencesRepository
+import com.example.data.OverlayRuntimeState
+import com.example.model.AnimationMode
 import com.example.model.BatterySaverConfig
+import com.example.model.PROCESSING_PULSE_COLORS
 import com.example.model.BatteryStatus
 import com.example.model.BorderShapeType
 import com.example.model.EdgeConfig
@@ -49,6 +52,7 @@ class EdgeOverlayService : Service() {
 
     private var isTemporaryAlertActive = false
     private var temporaryConfig: EdgeConfig? = null
+    private var lastSystemState: SystemState? = null
 
     companion object {
         const val CHANNEL_ID = "edge_lighting_overlay_channel"
@@ -217,9 +221,15 @@ class EdgeOverlayService : Service() {
             temporaryConfig = null
             releaseWakeLock()
 
-            removeOverlay()
-            stopForeground(STOP_FOREGROUND_REMOVE)
-            stopSelf()
+            // Zurück zum Grundzustand (Dauerlicht, Live-Vorschau oder Verarbeitungs-Puls bleiben erhalten)
+            val state = lastSystemState
+            if (state != null) {
+                applySystemState(state)
+            } else {
+                removeOverlay()
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelf()
+            }
         }
     }
 
@@ -317,53 +327,82 @@ class EdgeOverlayService : Service() {
                 repository.configFlow,
                 repository.scheduleConfigFlow,
                 repository.batterySaverConfigFlow,
-                batteryMonitor.status
-            ) { config, schedule, batterySaver, batteryStatus ->
-                SystemState(config, schedule, batterySaver, batteryStatus)
+                batteryMonitor.status,
+                repository.runtimeState
+            ) { config, schedule, batterySaver, batteryStatus, runtime ->
+                SystemState(config, schedule, batterySaver, batteryStatus, runtime)
             }.collect { state ->
-                val isDnd = state.schedule.isCurrentlyInDnd()
-                val isLowBatteryMode = state.batterySaver.shouldApplyBatterySaver(
-                    state.batteryStatus.levelPercent,
-                    state.batteryStatus.isPowerSaveMode,
-                    state.batteryStatus.isCharging
-                )
-
-                if (!isTemporaryAlertActive) {
-                    val shouldBeVisible = (state.config.isOverlayEnabled || state.config.isCallerAlertActive) && !isDnd
-                    if (!shouldBeVisible) {
-                        removeOverlay()
-                        if (!state.config.isCallerAlertActive) {
-                            stopForeground(STOP_FOREGROUND_REMOVE)
-                            stopSelf()
-                        }
-                    } else {
-                        ensureOverlayAttached()
-                        overlayView?.setBatterySaverMode(
-                            active = isLowBatteryMode,
-                            reduceFps = state.batterySaver.reduceFpsTo30,
-                            dimMultiplier = state.batterySaver.dimIntensityPercent / 100f,
-                            disableGlow = state.batterySaver.disableGlowFilter
-                        )
-                        overlayView?.updateConfig(state.config)
-                    }
-                } else {
-                    // Alert is active: apply battery settings even to alert
-                    overlayView?.setBatterySaverMode(
-                        active = isLowBatteryMode,
-                        reduceFps = state.batterySaver.reduceFpsTo30,
-                        dimMultiplier = state.batterySaver.dimIntensityPercent / 100f,
-                        disableGlow = state.batterySaver.disableGlowFilter
-                    )
-                }
+                lastSystemState = state
+                applySystemState(state)
             }
         }
     }
+
+    /** Entscheidet Sichtbarkeit und angezeigte Konfiguration. Priorität: Puls-Test > Live-Vorschau > Verarbeitung > Normal. */
+    private fun applySystemState(state: SystemState) {
+        val isDnd = state.schedule.isCurrentlyInDnd()
+        val isLowBatteryMode = state.batterySaver.shouldApplyBatterySaver(
+            state.batteryStatus.levelPercent,
+            state.batteryStatus.isPowerSaveMode,
+            state.batteryStatus.isCharging
+        )
+
+        overlayView?.setBatterySaverMode(
+            active = isLowBatteryMode,
+            reduceFps = state.batterySaver.reduceFpsTo30,
+            dimMultiplier = state.batterySaver.dimIntensityPercent / 100f,
+            disableGlow = state.batterySaver.disableGlowFilter
+        )
+        if (isTemporaryAlertActive) return
+
+        val runtime = state.runtime
+        val processingShown = runtime.processingTestActive ||
+                (runtime.processingActive && state.config.isProcessingPulseEnabled && !isDnd)
+        val normalShown = (state.config.isOverlayEnabled || state.config.isCallerAlertActive) && !isDnd
+
+        val displayConfig: EdgeConfig? = when {
+            runtime.processingTestActive -> processingConfig(state.config)
+            runtime.previewActive -> state.config
+            processingShown -> processingConfig(state.config)
+            normalShown -> state.config
+            else -> null
+        }
+
+        if (displayConfig == null) {
+            removeOverlay()
+            if (!state.config.isCallerAlertActive) {
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelf()
+            }
+            return
+        }
+
+        ensureOverlayAttached()
+        overlayView?.setBatterySaverMode(
+            active = isLowBatteryMode,
+            reduceFps = state.batterySaver.reduceFpsTo30,
+            dimMultiplier = state.batterySaver.dimIntensityPercent / 100f,
+            disableGlow = state.batterySaver.disableGlowFilter
+        )
+        overlayView?.updateConfig(displayConfig)
+    }
+
+    /** Blaues, atmendes Leuchten für laufende Vorgänge – Geometrie & Pulsgeschwindigkeit vom Nutzer. */
+    private fun processingConfig(base: EdgeConfig): EdgeConfig = base.copy(
+        useCustomColors = true,
+        customColors = PROCESSING_PULSE_COLORS,
+        shapeType = BorderShapeType.CONTINUOUS_LINE,
+        animationMode = AnimationMode.PULSE,
+        isGlowEnabled = true,
+        isCallerAlertActive = false
+    )
 
     private data class SystemState(
         val config: EdgeConfig,
         val schedule: EdgeScheduleConfig,
         val batterySaver: BatterySaverConfig,
-        val batteryStatus: BatteryStatus
+        val batteryStatus: BatteryStatus,
+        val runtime: OverlayRuntimeState
     )
 
     private fun createNotificationChannel() {
