@@ -1,0 +1,9 @@
+<resources>
+    <string name="app_name">EdgeLighting Pro</string>
+    <string name="overlay_service_title">EdgeLighting Pro Überlagerung</string>
+    <string name="overlay_service_desc">Kantenbeleuchtung aktiv über Apps und Sperrbildschirm</string>
+    <string name="caller_id_service_title">Edge Lighting Anruferkennung</string>
+    <string name="caller_id_service_desc">Überwacht Anrufe für Kantenleucht-Alarm</string>
+    <string name="live_wallpaper_name">EdgeLighting Pro Live-Hintergrund</string>
+    <string name="live_wallpaper_description">Animiertes LED-Kantenlicht als Live-Hintergrund für Start- und Sperrbildschirm</string>
+</resources>

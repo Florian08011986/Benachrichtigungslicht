@@ -1,0 +1,6 @@
+{
+  "name": "EdgeLighting Pro",
+  "description": "High-performance LED Borderlight & AOD Overlay with 48 vibrant gradient presets, customizable notch contours, live wallpaper mode, and caller ID edge alerts.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

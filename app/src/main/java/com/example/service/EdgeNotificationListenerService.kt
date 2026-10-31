@@ -1,0 +1,104 @@
+package com.example.service
+
+import android.app.Notification
+import android.content.Context
+import android.os.PowerManager
+import android.service.notification.NotificationListenerService
+import android.service.notification.StatusBarNotification
+import com.example.data.EdgePreferencesRepository
+import com.example.model.BorderShapeType
+
+class EdgeNotificationListenerService : NotificationListenerService() {
+
+    private lateinit var repository: EdgePreferencesRepository
+
+    override fun onCreate() {
+        super.onCreate()
+        repository = EdgePreferencesRepository.getInstance(applicationContext)
+    }
+
+    override fun onNotificationPosted(sbn: StatusBarNotification?) {
+        super.onNotificationPosted(sbn)
+        if (sbn == null) return
+
+        // Ignore our own ongoing service notification
+        if (sbn.packageName == packageName) return
+
+        // Ignore ongoing foreground service notifications (music player, downloads, etc.)
+        if (sbn.isOngoing) return
+
+        val notifSettings = repository.notificationSettingsFlow.value
+        if (!notifSettings.isNotificationAlertEnabled) return
+
+        // DND Ruhezeiten prüfen: In der Ruhephase wird kein Kantenlicht ausgelöst
+        val isDnd = repository.scheduleConfigFlow.value.isCurrentlyInDnd()
+        if (isDnd) return
+
+        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+        if (notifSettings.onlyWhenScreenOff && powerManager.isInteractive) {
+            return
+        }
+
+        val extras = sbn.notification?.extras
+        val title = extras?.getString(Notification.EXTRA_TITLE)
+            ?: extras?.getCharSequence(Notification.EXTRA_TITLE)?.toString()
+            ?: ""
+        val text = extras?.getCharSequence(Notification.EXTRA_TEXT)?.toString() ?: ""
+
+        val contactRules = repository.contactRulesFlow.value
+        val appRules = repository.appRulesFlow.value
+        val baseConfig = repository.configFlow.value
+
+        // 1. Check for specific Contact match (in title or text)
+        val matchedContact = contactRules.firstOrNull { rule ->
+            rule.isEnabled && rule.contactIdentifier.isNotBlank() &&
+                    (title.contains(rule.contactIdentifier, ignoreCase = true) ||
+                            text.contains(rule.contactIdentifier, ignoreCase = true))
+        }
+
+        if (matchedContact != null) {
+            EdgeOverlayService.triggerNotificationAlert(
+                context = applicationContext,
+                paletteId = matchedContact.paletteId,
+                useCustomColors = matchedContact.useCustomColors,
+                customColorsCsv = matchedContact.customColors.joinToString(","),
+                shapeType = matchedContact.shapeType.name,
+                customEmoji = matchedContact.customEmoji,
+                durationSeconds = matchedContact.durationSeconds,
+                wakeScreen = notifSettings.wakeScreenOnNotification
+            )
+            return
+        }
+
+        // 2. Check for App-specific rule
+        val matchedApp = appRules.firstOrNull { rule ->
+            rule.packageName == sbn.packageName && rule.isEnabled
+        }
+
+        if (matchedApp != null) {
+            EdgeOverlayService.triggerNotificationAlert(
+                context = applicationContext,
+                paletteId = matchedApp.paletteId,
+                useCustomColors = matchedApp.useCustomColors,
+                customColorsCsv = matchedApp.customColors.joinToString(","),
+                shapeType = matchedApp.shapeType.name,
+                customEmoji = matchedApp.customEmoji,
+                durationSeconds = matchedApp.durationSeconds,
+                wakeScreen = notifSettings.wakeScreenOnNotification
+            )
+            return
+        }
+
+        // 3. Fallback to default user edge configuration
+        EdgeOverlayService.triggerNotificationAlert(
+            context = applicationContext,
+            paletteId = baseConfig.selectedPaletteId,
+            useCustomColors = baseConfig.useCustomColors,
+            customColorsCsv = baseConfig.customColors.joinToString(","),
+            shapeType = baseConfig.shapeType.name,
+            customEmoji = baseConfig.customEmoji,
+            durationSeconds = notifSettings.defaultAlertDurationSeconds,
+            wakeScreen = notifSettings.wakeScreenOnNotification
+        )
+    }
+}
