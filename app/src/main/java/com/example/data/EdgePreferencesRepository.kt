@@ -7,6 +7,7 @@ import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.example.model.AnimationMode
@@ -17,6 +18,7 @@ import com.example.model.DefaultAppRules
 import com.example.model.EdgeConfig
 import com.example.model.EdgeScheduleConfig
 import com.example.model.LightProfile
+import com.example.model.LightWhen
 import com.example.model.LineStyle
 import com.example.model.PulseCurve
 import com.example.model.NotchConfig
@@ -105,7 +107,8 @@ class EdgePreferencesRepository private constructor(context: Context) {
         val USE_CUSTOM_COLORS = booleanPreferencesKey("use_custom_colors")
         val CUSTOM_COLORS_CSV = stringPreferencesKey("custom_colors_csv")
         val LINE_STYLE = stringPreferencesKey("line_style")
-        val TAIL_LENGTH = floatPreferencesKey("tail_length")
+        val RING_COLOR = longPreferencesKey("ring_color")
+        val CALL_COLOR = longPreferencesKey("call_color")
         val GLOW_REACH = floatPreferencesKey("glow_reach")
         val PULSE_CURVE = stringPreferencesKey("pulse_curve")
         val PULSE_STRENGTH = floatPreferencesKey("pulse_strength")
@@ -133,6 +136,7 @@ class EdgePreferencesRepository private constructor(context: Context) {
         val NOTIF_DURATION = intPreferencesKey("notif_duration")
         val NOTIF_ONLY_SCREEN_OFF = booleanPreferencesKey("notif_only_screen_off")
         val NOTIF_UNTIL_DISMISSED = booleanPreferencesKey("notif_until_dismissed")
+        val NOTIF_LIGHT_WHEN = stringPreferencesKey("notif_light_when")
         val APP_RULES_RAW = stringPreferencesKey("app_rules_raw")
         val CONTACT_RULES_RAW = stringPreferencesKey("contact_rules_raw")
 
@@ -185,7 +189,8 @@ class EdgePreferencesRepository private constructor(context: Context) {
                 useCustomColors = prefs[Keys.USE_CUSTOM_COLORS] ?: false,
                 customColors = customColorsList,
                 lineStyle = lineStyle,
-                tailLength = prefs[Keys.TAIL_LENGTH] ?: 0.35f,
+                ringColor = prefs[Keys.RING_COLOR] ?: 0xFF00E5FFL,
+                callColor = prefs[Keys.CALL_COLOR] ?: 0xFF2F7BFFL,
                 glowReach = prefs[Keys.GLOW_REACH] ?: 120f,
                 borderThickness = prefs[Keys.BORDER_THICKNESS] ?: 18f,
                 animationSpeed = prefs[Keys.ANIMATION_SPEED] ?: 5f,
@@ -219,6 +224,11 @@ class EdgePreferencesRepository private constructor(context: Context) {
                 wakeScreenOnNotification = prefs[Keys.NOTIF_WAKE_SCREEN] ?: true,
                 defaultAlertDurationSeconds = prefs[Keys.NOTIF_DURATION] ?: 6,
                 onlyWhenScreenOff = prefs[Keys.NOTIF_ONLY_SCREEN_OFF] ?: false,
+                // Übernahme der alten Option „nur bei ausgeschaltetem Bildschirm“ → Sperrmodus
+                lightWhen = parseEnum(
+                    prefs[Keys.NOTIF_LIGHT_WHEN],
+                    if (prefs[Keys.NOTIF_ONLY_SCREEN_OFF] == true) LightWhen.LOCKED else LightWhen.BOTH
+                ),
                 pulseUntilDismissed = prefs[Keys.NOTIF_UNTIL_DISMISSED] ?: false
             )
         }.stateIn(
@@ -340,13 +350,11 @@ class EdgePreferencesRepository private constructor(context: Context) {
 
     fun updateLineStyle(
         lineStyle: LineStyle? = null,
-        tailLength: Float? = null,
         glowReach: Float? = null
     ) {
         scope.launch {
             applicationContext.dataStore.edit { prefs ->
                 lineStyle?.let { prefs[Keys.LINE_STYLE] = it.name }
-                tailLength?.let { prefs[Keys.TAIL_LENGTH] = it }
                 glowReach?.let { prefs[Keys.GLOW_REACH] = it }
             }
         }
@@ -411,6 +419,14 @@ class EdgePreferencesRepository private constructor(context: Context) {
         }
     }
 
+    fun updateRingColor(color: Long) {
+        scope.launch { applicationContext.dataStore.edit { it[Keys.RING_COLOR] = color } }
+    }
+
+    fun updateCallColor(color: Long) {
+        scope.launch { applicationContext.dataStore.edit { it[Keys.CALL_COLOR] = color } }
+    }
+
     fun updateTwoStageStartEnabled(enabled: Boolean) {
         scope.launch {
             applicationContext.dataStore.edit { it[Keys.TWO_STAGE_START] = enabled }
@@ -443,6 +459,7 @@ class EdgePreferencesRepository private constructor(context: Context) {
                 prefs[Keys.NOTIF_WAKE_SCREEN] = settings.wakeScreenOnNotification
                 prefs[Keys.NOTIF_DURATION] = settings.defaultAlertDurationSeconds
                 prefs[Keys.NOTIF_ONLY_SCREEN_OFF] = settings.onlyWhenScreenOff
+                prefs[Keys.NOTIF_LIGHT_WHEN] = settings.lightWhen.name
                 prefs[Keys.NOTIF_UNTIL_DISMISSED] = settings.pulseUntilDismissed
             }
         }
@@ -580,7 +597,7 @@ class EdgePreferencesRepository private constructor(context: Context) {
             if (p.size >= 9) {
                 val customCol = p[5].split(";")
                     .mapNotNull { it.trim().toLongOrNull() }
-                val style = parseEnum(p[6], LineStyle.COMET)
+                val style = parseEnum(p[6], LineStyle.RING)
                 ContactEdgeRule(
                     id = p[0].ifBlank { UUID.randomUUID().toString() },
                     contactIdentifier = p[1],

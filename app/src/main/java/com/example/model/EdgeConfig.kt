@@ -2,12 +2,33 @@ package com.example.model
 
 /** Visualisierung entlang des Bildschirmrands – ausschließlich linienförmig. */
 enum class LineStyle(val displayName: String, val description: String) {
-    RING("Ring", "Voller Rahmen mit wanderndem Farbverlauf"),
-    COMET("Komet", "Heller Kopf mit langem, auslaufendem Schweif"),
-    DUAL_COMET("Doppelkomet", "Zwei Kometen auf gegenüberliegenden Seiten"),
-    RUNNING_LIGHTS("Lauflicht", "Lichtstriche wandern am Rand entlang"),
+    RING("Ring", "Ruhiger, durchgehender Rahmen in einer Farbe"),
     AURA("KI-Aura", "Keine Kontur – Licht zieht weich ins Display")
 }
+
+/** Wann eine Benachrichtigung den Rand aufleuchten lässt. */
+enum class LightWhen(val displayName: String) {
+    SCREEN_ACTIVE("Bei aktivem Display"),
+    LOCKED("Im Sperrmodus"),
+    BOTH("Beides")
+}
+
+/** Auswahl-Farbfelder für Ring-, App- und Anruf-Farben (je eine Farbe). */
+val COLOR_SWATCHES: List<Long> = listOf(
+    0xFF25D366L, // Grün
+    0xFF00C853L, // Smaragd
+    0xFF00E5FFL, // Cyan
+    0xFF2F7BFFL, // Blau
+    0xFF1A3DFFL, // Königsblau
+    0xFF7C4DFFL, // Violett
+    0xFFD500F9L, // Magenta
+    0xFFFF4081L, // Pink
+    0xFFFF1744L, // Rot
+    0xFFFF6D00L, // Orange
+    0xFFD97757L, // Terrakotta
+    0xFFFFC400L, // Gelb
+    0xFFFFFFFFL  // Weiß
+)
 
 enum class NotchType(val displayName: String) {
     NONE("Keine (Gerader Rand)"),
@@ -104,7 +125,8 @@ data class EdgeConfig(
     val useCustomColors: Boolean = false,
     val customColors: List<Long> = listOf(0xFF00E5FFL, 0xFFD500F9L, 0xFFFF1744L),
     val lineStyle: LineStyle = LineStyle.RING,
-    val tailLength: Float = 0.35f,      // Komet: Anteil des Umfangs 0.1..0.9
+    val ringColor: Long = 0xFF00E5FFL,  // Grundfarbe des Rings (Apps ohne eigene Farbe)
+    val callColor: Long = 0xFF2F7BFFL,  // Farbe bei eingehenden Anrufen
     val glowReach: Float = 120f,        // px, wie weit Glow/Aura ins Display reicht
     val borderThickness: Float = 18f,   // px
     val animationSpeed: Float = 5f,     // 0.2f..20f (Bewegungstempo, 1x = 36°/s)
@@ -119,5 +141,6 @@ data class EdgeConfig(
     val cornerRadiusBottom: Float = 70f,// px
     val notchConfig: NotchConfig = NotchConfig(),
     val isGlowEnabled: Boolean = true,
-    val isCallerAlertActive: Boolean = false // Set when phone is ringing
+    val isCallerAlertActive: Boolean = false, // Set when phone is ringing
+    val colorOverride: Long? = null       // Laufzeit: Einzelfarbe für Alarm (App/Anruf), nicht gespeichert
 )

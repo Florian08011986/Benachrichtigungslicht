@@ -18,7 +18,7 @@ data class ContactEdgeRule(
     val paletteId: Int = 41, // e.g. Crimson Red or custom
     val useCustomColors: Boolean = false,
     val customColors: List<Long> = emptyList(),
-    val lineStyle: LineStyle = LineStyle.COMET,
+    val lineStyle: LineStyle = LineStyle.RING,
     val durationSeconds: Int = 8
 )
 
@@ -28,8 +28,18 @@ data class NotificationEdgeSettings(
     val defaultAlertDurationSeconds: Int = 6,
     val onlyWhenScreenOff: Boolean = false,
     val repeatPulseCount: Int = 1,
-    val pulseUntilDismissed: Boolean = false // Rand atmet weiter, bis die Benachrichtigung entfernt ist
+    val pulseUntilDismissed: Boolean = false, // Rand atmet weiter, bis die Benachrichtigung entfernt ist
+    val lightWhen: LightWhen = LightWhen.BOTH
 )
+
+/** Einzelfarbe einer Regel: eigene Farbe, sonst erste Farbe der gewählten Palette. */
+fun AppEdgeRule.singleColor(): Long =
+    if (useCustomColors && customColors.isNotEmpty()) customColors.first()
+    else EdgeColorPalette.getPreset(paletteId).colors.first()
+
+fun ContactEdgeRule.singleColor(): Long =
+    if (useCustomColors && customColors.isNotEmpty()) customColors.first()
+    else EdgeColorPalette.getPreset(paletteId).colors.first()
 
 object DefaultAppRules {
     fun getDefaultRules(): List<AppEdgeRule> = listOf(
@@ -62,7 +72,7 @@ object DefaultAppRules {
             appName = "Messages (SMS)",
             isEnabled = true,
             paletteId = 0, // Cyber Neon
-            lineStyle = LineStyle.COMET,
+            lineStyle = LineStyle.RING,
             durationSeconds = 6
         ),
         AppEdgeRule(
@@ -78,7 +88,7 @@ object DefaultAppRules {
             appName = "Snapchat",
             isEnabled = true,
             paletteId = 42, // Acid Yellow
-            lineStyle = LineStyle.RUNNING_LIGHTS,
+            lineStyle = LineStyle.RING,
             durationSeconds = 6
         )
     )

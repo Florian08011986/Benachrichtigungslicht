@@ -21,7 +21,12 @@ import com.example.model.NotificationEdgeSettings
 import com.example.service.CallerIdMonitorService
 import com.example.service.EdgeOverlayService
 import com.example.util.BatteryMonitor
+import com.example.util.InstalledApp
+import com.example.util.InstalledApps
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 
@@ -89,7 +94,8 @@ class EdgeDashboardViewModel(application: Application) : AndroidViewModel(applic
         useCustomColors: Boolean,
         customColors: List<Long>,
         lineStyle: LineStyle,
-        durationSeconds: Int
+        durationSeconds: Int,
+        singleColor: Long = 0L
     ) {
         val context = getApplication<Application>()
         EdgeOverlayService.triggerNotificationAlert(
@@ -99,7 +105,8 @@ class EdgeDashboardViewModel(application: Application) : AndroidViewModel(applic
             customColorsCsv = customColors.joinToString(","),
             lineStyle = lineStyle.name,
             durationSeconds = durationSeconds,
-            wakeScreen = notificationSettings.value.wakeScreenOnNotification
+            wakeScreen = notificationSettings.value.wakeScreenOnNotification,
+            singleColor = singleColor
         )
     }
 
@@ -114,7 +121,8 @@ class EdgeDashboardViewModel(application: Application) : AndroidViewModel(applic
             useCustomColors = current.useCustomColors,
             customColors = current.customColors,
             lineStyle = current.lineStyle,
-            durationSeconds = durationSeconds
+            durationSeconds = durationSeconds,
+            singleColor = if (current.lineStyle == LineStyle.RING) current.ringColor else 0L
         )
     }
 
@@ -126,8 +134,46 @@ class EdgeDashboardViewModel(application: Application) : AndroidViewModel(applic
         repository.updateCustomColors(colors)
     }
 
-    fun updateLineStyle(lineStyle: LineStyle? = null, tailLength: Float? = null, glowReach: Float? = null) {
-        repository.updateLineStyle(lineStyle = lineStyle, tailLength = tailLength, glowReach = glowReach)
+    fun updateLineStyle(lineStyle: LineStyle? = null, glowReach: Float? = null) {
+        repository.updateLineStyle(lineStyle = lineStyle, glowReach = glowReach)
+    }
+
+    fun setRingColor(color: Long) = repository.updateRingColor(color)
+
+    fun setCallColor(color: Long) = repository.updateCallColor(color)
+
+    // Installierte Apps für die App-Farbenliste (einmalig im Hintergrund geladen)
+    private val _installedApps = MutableStateFlow<List<InstalledApp>>(emptyList())
+    val installedApps: StateFlow<List<InstalledApp>> = _installedApps.asStateFlow()
+
+    fun loadInstalledApps() {
+        if (_installedApps.value.isNotEmpty()) return
+        viewModelScope.launch(Dispatchers.IO) {
+            _installedApps.value = InstalledApps.load(getApplication())
+        }
+    }
+
+    /** Setzt die Einzelfarbe einer App (legt die Regel an, falls es noch keine gibt). */
+    fun setAppColor(app: InstalledApp, color: Long) {
+        val existing = appRules.value.firstOrNull { it.packageName == app.packageName }
+        val rule = (existing ?: AppEdgeRule(packageName = app.packageName, appName = app.label))
+            .copy(useCustomColors = true, customColors = listOf(color), isEnabled = true)
+        repository.saveAppRule(rule)
+    }
+
+    /** Entfernt die eigene Farbe → App nutzt wieder die Ring-Grundfarbe. */
+    fun clearAppColor(packageName: String) = repository.removeAppRule(packageName)
+
+    /** Zeigt die Farbe einer App kurz am Display. */
+    fun testAppColor(color: Long) {
+        triggerTestNotification(
+            paletteId = config.value.selectedPaletteId,
+            useCustomColors = false,
+            customColors = emptyList(),
+            lineStyle = config.value.lineStyle,
+            durationSeconds = 4,
+            singleColor = color
+        )
     }
 
     fun updateGeometry(

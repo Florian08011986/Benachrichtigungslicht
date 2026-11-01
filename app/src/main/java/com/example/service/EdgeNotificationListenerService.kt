@@ -1,11 +1,15 @@
 package com.example.service
 
+import android.app.KeyguardManager
 import android.app.Notification
 import android.content.Context
 import android.os.PowerManager
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import com.example.data.EdgePreferencesRepository
+import com.example.model.LightWhen
+import com.example.model.LineStyle
+import com.example.model.singleColor
 
 class EdgeNotificationListenerService : NotificationListenerService() {
 
@@ -27,6 +31,18 @@ class EdgeNotificationListenerService : NotificationListenerService() {
         // „Bis gelesen“: Licht endet, sobald keine leuchtende Benachrichtigung mehr offen ist
         if (sbn != null && repository.removePendingAlertKey(sbn.key)) {
             EdgeOverlayService.clearNotificationAlert(applicationContext)
+        }
+    }
+
+    /** Prüft „Wann leuchten“: Sperrmodus = Gerät gesperrt oder Bildschirm aus; aktiv = entsperrt und an. */
+    private fun isAllowedNow(lightWhen: LightWhen): Boolean {
+        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+        val keyguard = getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
+        val locked = keyguard.isKeyguardLocked || !powerManager.isInteractive
+        return when (lightWhen) {
+            LightWhen.BOTH -> true
+            LightWhen.LOCKED -> locked
+            LightWhen.SCREEN_ACTIVE -> !locked
         }
     }
 
@@ -74,10 +90,7 @@ class EdgeNotificationListenerService : NotificationListenerService() {
         val isDnd = repository.scheduleConfigFlow.value.isCurrentlyInDnd()
         if (isDnd) return
 
-        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
-        if (notifSettings.onlyWhenScreenOff && powerManager.isInteractive) {
-            return
-        }
+        if (!isAllowedNow(notifSettings.lightWhen)) return
 
         val extras = sbn.notification?.extras
         val title = extras?.getString(Notification.EXTRA_TITLE)
@@ -109,7 +122,8 @@ class EdgeNotificationListenerService : NotificationListenerService() {
                 customColorsCsv = matchedContact.customColors.joinToString(","),
                 lineStyle = matchedContact.lineStyle.name,
                 durationSeconds = duration(matchedContact.durationSeconds),
-                wakeScreen = notifSettings.wakeScreenOnNotification
+                wakeScreen = notifSettings.wakeScreenOnNotification,
+                singleColor = matchedContact.singleColor()
             )
             return
         }
@@ -127,7 +141,8 @@ class EdgeNotificationListenerService : NotificationListenerService() {
                 customColorsCsv = matchedApp.customColors.joinToString(","),
                 lineStyle = matchedApp.lineStyle.name,
                 durationSeconds = duration(matchedApp.durationSeconds),
-                wakeScreen = notifSettings.wakeScreenOnNotification
+                wakeScreen = notifSettings.wakeScreenOnNotification,
+                singleColor = matchedApp.singleColor()
             )
             return
         }
@@ -140,7 +155,9 @@ class EdgeNotificationListenerService : NotificationListenerService() {
             customColorsCsv = baseConfig.customColors.joinToString(","),
             lineStyle = baseConfig.lineStyle.name,
             durationSeconds = duration(notifSettings.defaultAlertDurationSeconds),
-            wakeScreen = notifSettings.wakeScreenOnNotification
+            wakeScreen = notifSettings.wakeScreenOnNotification,
+            // Apps ohne eigene Farbe: Ring = Grundfarbe, Aura = Farbverlauf der Palette
+            singleColor = if (baseConfig.lineStyle == LineStyle.RING) baseConfig.ringColor else 0L
         )
     }
 }

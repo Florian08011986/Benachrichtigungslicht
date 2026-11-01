@@ -16,8 +16,8 @@ android {
     applicationId = "com.aistudio.edgelighting.kxmpzq"
     minSdk = 29
     targetSdk = 35
-    versionCode = 5
-    versionName = "2.1"
+    versionCode = 6
+    versionName = "2.2"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }

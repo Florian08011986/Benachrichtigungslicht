@@ -97,7 +97,7 @@ class ExampleRobolectricTest {
             paletteId = 41
         )
         assertEquals("Mama", contactRule.contactIdentifier)
-        assertEquals(LineStyle.COMET, contactRule.lineStyle)
+        assertEquals(LineStyle.RING, contactRule.lineStyle)
     }
 
     @Test
@@ -216,7 +216,6 @@ class ExampleRobolectricTest {
                         lineStyle = style,
                         animationMode = mode,
                         pulseCurve = curve,
-                        tailLength = 0.6f,
                         glowReach = 180f
                     )
                     renderer.updateDimensions(1080f, 2400f, testConfig)

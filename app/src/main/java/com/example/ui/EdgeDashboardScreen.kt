@@ -79,6 +79,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -106,6 +107,12 @@ import com.example.ui.components.ColorPresetItem
 import com.example.ui.components.ContactRuleCard
 import com.example.ui.components.CustomColorEditor
 import com.example.ui.components.LivePreviewCard
+import com.example.ui.components.ColorSwatches
+import com.example.ui.components.AppColorRow
+import com.example.ui.components.AppColorDialog
+import com.example.model.LightWhen
+import com.example.model.singleColor
+import com.example.util.InstalledApp
 import com.example.model.AnimationMode
 import com.example.model.LightProfiles
 import androidx.lifecycle.compose.LifecycleResumeEffect
@@ -139,6 +146,39 @@ fun EdgeDashboardScreen(
     val batteryStatus by viewModel.batteryStatus.collectAsState()
 
     var selectedTab by remember { mutableIntStateOf(0) }
+    val installedApps by viewModel.installedApps.collectAsState()
+    var appSearch by remember { mutableStateOf("") }
+    var colorDialogApp by remember { mutableStateOf<InstalledApp?>(null) }
+    var colorDialogForCalls by remember { mutableStateOf(false) }
+
+    LaunchedEffect(selectedTab) {
+        if (selectedTab == 3) viewModel.loadInstalledApps()
+    }
+
+    // Farbauswahl-Dialoge
+    colorDialogApp?.let { app ->
+        val current = appRules.firstOrNull { it.packageName == app.packageName }?.singleColor()
+        AppColorDialog(
+            title = app.label,
+            current = current,
+            allowReset = true,
+            onSelect = { viewModel.setAppColor(app, it) },
+            onReset = { viewModel.clearAppColor(app.packageName) },
+            onTest = { viewModel.testAppColor(it) },
+            onDismiss = { colorDialogApp = null }
+        )
+    }
+    if (colorDialogForCalls) {
+        AppColorDialog(
+            title = "Anrufe",
+            current = config.callColor,
+            allowReset = false,
+            onSelect = { viewModel.setCallColor(it) },
+            onReset = {},
+            onTest = { viewModel.testAppColor(it) },
+            onDismiss = { colorDialogForCalls = false }
+        )
+    }
     var selectedCategory by remember { mutableStateOf("Alle") }
     var testingPulse by remember { mutableStateOf(false) }
 
@@ -532,25 +572,7 @@ fun EdgeDashboardScreen(
                                 }
                             }
 
-                            AnimatedVisibility(
-                                visible = config.lineStyle == LineStyle.COMET || config.lineStyle == LineStyle.DUAL_COMET
-                            ) {
-                                Column(modifier = Modifier.padding(top = 12.dp)) {
-                                    Text(
-                                        text = "Schweiflänge: ${(config.tailLength * 100).toInt()} % des Rands",
-                                        color = TextPrimary,
-                                        style = MaterialTheme.typography.bodyMedium
-                                    )
-                                    Slider(
-                                        value = config.tailLength.coerceIn(0.1f, 0.9f),
-                                        onValueChange = { viewModel.updateLineStyle(tailLength = it) },
-                                        valueRange = 0.1f..0.9f,
-                                        colors = SliderDefaults.colors(thumbColor = NeonCyan, activeTrackColor = NeonCyan),
-                                        modifier = Modifier.testTag("tail_length_slider")
-                                    )
-                                }
-                            }
-
+                            if (config.lineStyle == LineStyle.AURA) {
                             Spacer(modifier = Modifier.height(8.dp))
                             Text(
                                 text = "Leucht-Reichweite ins Display: ${config.glowReach.toInt()} px",
@@ -569,12 +591,112 @@ fun EdgeDashboardScreen(
                                 colors = SliderDefaults.colors(thumbColor = NeonCyan, activeTrackColor = NeonCyan),
                                 modifier = Modifier.testTag("glow_reach_slider")
                             )
+                            }
                         }
                     }
                 }
 
-                // Deckkraft
+                // Ring: nur Farbe und Stärke
+                if (config.lineStyle == LineStyle.RING) item {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(20.dp),
+                        colors = CardDefaults.cardColors(containerColor = DarkSurface),
+                        border = CardDefaults.outlinedCardBorder()
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Text(
+                                text = "Ring",
+                                color = TextPrimary,
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Text(
+                                text = "Farbe",
+                                color = TextPrimary,
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                text = "Gilt für alle Apps ohne eigene Farbe (App-Farben im Tab „4. Apps & VIP“)",
+                                color = TextMuted,
+                                style = MaterialTheme.typography.labelSmall
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            ColorSwatches(
+                                selected = config.ringColor,
+                                onSelect = { viewModel.setRingColor(it) },
+                                modifier = Modifier.testTag("ring_color_swatches")
+                            )
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Text(
+                                text = "Stärke: ${config.borderThickness.toInt()} px",
+                                color = TextPrimary,
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Slider(
+                                value = config.borderThickness.coerceIn(2f, 60f),
+                                onValueChange = { viewModel.updateGeometry(borderThickness = it) },
+                                valueRange = 2f..60f,
+                                colors = SliderDefaults.colors(thumbColor = Color(config.ringColor), activeTrackColor = Color(config.ringColor)),
+                                modifier = Modifier.testTag("ring_thickness_slider")
+                            )
+                        }
+                    }
+                }
+
+                // Wann leuchten (gilt für Ring und KI-Aura)
                 item {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(20.dp),
+                        colors = CardDefaults.cardColors(containerColor = DarkSurface),
+                        border = CardDefaults.outlinedCardBorder()
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Text(
+                                text = "Wann leuchten",
+                                color = TextPrimary,
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            FlowRow(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                LightWhen.entries.forEach { option ->
+                                    FilterChip(
+                                        selected = notifSettings.lightWhen == option,
+                                        onClick = { viewModel.updateNotificationSettings(notifSettings.copy(lightWhen = option)) },
+                                        label = { Text(option.displayName) },
+                                        colors = FilterChipDefaults.filterChipColors(
+                                            selectedContainerColor = NeonCyan.copy(alpha = 0.25f),
+                                            selectedLabelColor = NeonCyan,
+                                            labelColor = TextSecondary
+                                        ),
+                                        modifier = Modifier.testTag("light_when_${option.name}")
+                                    )
+                                }
+                            }
+                            Text(
+                                text = when (notifSettings.lightWhen) {
+                                    LightWhen.SCREEN_ACTIVE -> "Nur wenn das Handy entsperrt ist und du es benutzt"
+                                    LightWhen.LOCKED -> "Nur wenn das Handy gesperrt oder der Bildschirm aus ist"
+                                    LightWhen.BOTH -> "Immer – entsperrt und gesperrt"
+                                },
+                                color = TextMuted,
+                                style = MaterialTheme.typography.labelSmall,
+                                modifier = Modifier.padding(top = 6.dp)
+                            )
+                        }
+                    }
+                }
+
+                // Deckkraft (nur KI-Aura)
+                if (config.lineStyle == LineStyle.AURA) item {
                     Card(
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(20.dp),
@@ -615,8 +737,8 @@ fun EdgeDashboardScreen(
                     }
                 }
 
-                // Bewegung & Puls
-                item {
+                // Bewegung & Puls (nur KI-Aura)
+                if (config.lineStyle == LineStyle.AURA) item {
                     Card(
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(20.dp),
@@ -1307,47 +1429,52 @@ fun EdgeDashboardScreen(
                     }
                 }
 
+                // App-Farben: je App eine Farbe; Anrufe extra
                 item {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
+                    Column {
                         Text(
-                            text = "App-spezifische Profile (${appRules.size})",
+                            text = "App-Farben",
                             color = TextPrimary,
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold
                         )
-
-                        Button(
-                            onClick = { showAddAppDialog = true },
-                            colors = ButtonDefaults.buttonColors(containerColor = DarkSurfaceVariant),
-                            border = ButtonDefaults.outlinedButtonBorder(enabled = true),
-                            shape = RoundedCornerShape(10.dp),
-                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
-                        ) {
-                            Icon(Icons.Default.Add, contentDescription = "Hinzufügen", tint = NeonCyan, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("App hinzufügen", color = NeonCyan, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                        }
+                        Text(
+                            text = "Tippe auf eine App und wähle ihre Farbe. Ohne eigene Farbe leuchtet die Ring-Grundfarbe.",
+                            color = TextMuted,
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        AppColorRow(
+                            packageName = null,
+                            label = "Anrufe",
+                            color = config.callColor,
+                            fallbackColor = config.ringColor,
+                            onClick = { colorDialogForCalls = true }
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        OutlinedTextField(
+                            value = appSearch,
+                            onValueChange = { appSearch = it },
+                            placeholder = { Text("App suchen …") },
+                            singleLine = true,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("app_search")
+                        )
                     }
                 }
 
-                items(appRules) { rule ->
-                    AppRuleCard(
-                        rule = rule,
-                        onUpdate = { viewModel.saveAppRule(it) },
-                        onDelete = { viewModel.removeAppRule(rule.packageName) },
-                        onTestAlert = {
-                            viewModel.triggerTestNotification(
-                                paletteId = rule.paletteId,
-                                useCustomColors = rule.useCustomColors,
-                                customColors = rule.customColors,
-                                lineStyle = rule.lineStyle,
-                                durationSeconds = rule.durationSeconds
-                            )
-                        }
+                val rulesByPackage = appRules.associateBy { it.packageName }
+                val visibleApps = installedApps.filter {
+                    appSearch.isBlank() || it.label.contains(appSearch, ignoreCase = true)
+                }.sortedByDescending { rulesByPackage.containsKey(it.packageName) } // Apps mit Farbe zuerst
+                items(visibleApps, key = { it.packageName }) { app ->
+                    AppColorRow(
+                        packageName = app.packageName,
+                        label = app.label,
+                        color = rulesByPackage[app.packageName]?.singleColor(),
+                        fallbackColor = config.ringColor,
+                        onClick = { colorDialogApp = app }
                     )
                 }
 
@@ -1892,7 +2019,7 @@ fun EdgeDashboardScreen(
                                     id = UUID.randomUUID().toString(),
                                     contactIdentifier = newContactName.trim(),
                                     paletteId = newContactPaletteId,
-                                    lineStyle = LineStyle.COMET,
+                                    lineStyle = LineStyle.RING,
                                     durationSeconds = 8
                                 )
                             )

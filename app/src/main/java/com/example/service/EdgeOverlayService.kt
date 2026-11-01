@@ -81,6 +81,7 @@ class EdgeOverlayService : Service() {
         const val EXTRA_LINE_STYLE = "extra_line_style"
         const val EXTRA_DURATION_SECONDS = "extra_duration_seconds"
         const val EXTRA_WAKE_SCREEN = "extra_wake_screen"
+        const val EXTRA_SINGLE_COLOR = "extra_single_color" // 0 = keine Einzelfarbe (Aura-Verlauf)
 
         fun startOverlay(context: Context) {
             val intent = Intent(context, EdgeOverlayService::class.java).apply {
@@ -110,7 +111,8 @@ class EdgeOverlayService : Service() {
             customColorsCsv: String,
             lineStyle: String,
             durationSeconds: Int,
-            wakeScreen: Boolean
+            wakeScreen: Boolean,
+            singleColor: Long = 0L
         ) {
             val intent = Intent(context, EdgeOverlayService::class.java).apply {
                 action = ACTION_SHOW_NOTIF_ALERT
@@ -120,6 +122,7 @@ class EdgeOverlayService : Service() {
                 putExtra(EXTRA_LINE_STYLE, lineStyle)
                 putExtra(EXTRA_DURATION_SECONDS, durationSeconds)
                 putExtra(EXTRA_WAKE_SCREEN, wakeScreen)
+                putExtra(EXTRA_SINGLE_COLOR, singleColor)
             }
             startServiceCompat(context, intent)
         }
@@ -208,6 +211,7 @@ class EdgeOverlayService : Service() {
         val untilDismissed = requested == DURATION_UNTIL_DISMISSED
         val durationSeconds = if (untilDismissed) UNTIL_DISMISSED_CAP_S else requested.coerceIn(2, 30)
         val wakeScreen = intent.getBooleanExtra(EXTRA_WAKE_SCREEN, true)
+        val singleColor = intent.getLongExtra(EXTRA_SINGLE_COLOR, 0L).takeIf { it != 0L }
 
         val customColors = customColorsCsv.split(",")
             .mapNotNull { it.trim().toLongOrNull() }
@@ -220,7 +224,8 @@ class EdgeOverlayService : Service() {
             useCustomColors = useCustom,
             customColors = if (useCustom && customColors.isNotEmpty()) customColors else baseConfig.customColors,
             lineStyle = style,
-            isCallerAlertActive = true
+            isCallerAlertActive = true,
+            colorOverride = singleColor
         )
 
         isTemporaryAlertActive = true
@@ -395,7 +400,10 @@ class EdgeOverlayService : Service() {
         }
         val displayConfig: EdgeConfig? = when (kind) {
             DisplayKind.TEST, DisplayKind.PROCESSING -> processingConfig(state.config)
-            DisplayKind.PREVIEW, DisplayKind.NORMAL -> state.config
+            DisplayKind.PREVIEW, DisplayKind.NORMAL ->
+                // Eingehender Anruf: Ring in der Anruf-Farbe
+                if (state.config.isCallerAlertActive) state.config.copy(colorOverride = state.config.callColor)
+                else state.config
             DisplayKind.NONE -> null
         }
         val kindChanged = kind != lastDisplayKind

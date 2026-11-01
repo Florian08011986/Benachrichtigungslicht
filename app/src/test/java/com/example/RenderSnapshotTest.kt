@@ -56,8 +56,7 @@ class RenderSnapshotTest {
                 selectedPaletteId = 48,
                 animationMode = AnimationMode.ROTATE,
                 glowReach = 140f,
-                borderThickness = 10f,
-                tailLength = 0.45f
+                borderThickness = 10f
             )
             save(renderFrame(cfg), "style_${style.name}")
         }
@@ -121,5 +120,34 @@ class RenderSnapshotTest {
         println("RING opacity100 edge pixel: r=${Color.red(c)} g=${Color.green(c)} b=${Color.blue(c)}")
         // Inhalt ist (28,28,32); voll deckender Kern muss die Palettenfarbe zeigen, nicht den Inhalt
         assertTrue("Kern deckt nicht", Color.blue(c) > 150)
+    }
+
+    @Test
+    fun ring_usesRingColor_andAppColorOverride_andStaysSteady() {
+        val green = 0xFF25D366L
+        val orange = 0xFFD97757L
+        val base = EdgeConfig(
+            lineStyle = LineStyle.RING, ringColor = green, isGlowEnabled = false,
+            borderThickness = 16f, animationMode = AnimationMode.ROTATE_AND_PULSE
+        )
+        // Grundfarbe
+        val g = renderFrame(base).getPixel(4, h / 2)
+        println("RING base pixel: ${Integer.toHexString(g)}")
+        assertTrue("Ring nicht grün", Color.green(g) > 180 && Color.red(g) < 80)
+
+        // App-Farbe (Alarm) überschreibt Grundfarbe; Alarm erzwingt beim Ring KEIN Pulsieren
+        val alert = base.copy(colorOverride = orange, isCallerAlertActive = true)
+        val renderer = EdgeLightRenderer()
+        renderer.updateDimensions(w.toFloat(), h.toFloat(), alert)
+        val samples = (0 until 6).map { i ->
+            val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(bmp)
+            canvas.drawColor(Color.rgb(28, 28, 32))
+            renderer.render(canvas, alert, 1_000_000_000L + i * 150_000_000L)
+            bmp.getPixel(4, h / 2)
+        }
+        println("RING alert pixels: ${samples.map { Integer.toHexString(it) }}")
+        assertTrue("App-Farbe nicht orange", Color.red(samples[0]) > 180 && Color.blue(samples[0]) < 120)
+        assertTrue("Ring flackert/pulsiert", samples.distinct().size == 1)
     }
 }

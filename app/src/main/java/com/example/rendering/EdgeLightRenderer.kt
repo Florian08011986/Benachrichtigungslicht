@@ -14,19 +14,16 @@ import com.example.model.LineStyle
 import com.example.model.NotchType
 import com.example.model.PulseCurve
 import com.example.model.TWO_STAGE_INTRO_COLORS
-import kotlin.math.PI
 import kotlin.math.atan2
 import kotlin.math.floor
 import kotlin.math.min
-import kotlin.math.sin
 
 /**
  * Zeichnet die Randbeleuchtung – ausschließlich linienförmige Stile entlang des Rands.
  *
  * - Weicher Schein/Aura: nicht überlappende, abgerundete Ringe mit vorberechnetem Helligkeitsprofil
  *   (kein BlurMaskFilter: laut Android-Doku wird setMaskFilter() mit Hardware-Beschleunigung nicht unterstützt).
- * - Komet/Lauflicht: Farbverlauf (SweepGradient) mit Alpha-Maske, pro Frame über eine
- *   Bogenlänge→Winkel-Tabelle erzeugt → gleichmäßiges Tempo an allen Kanten, keine Segmente.
+ * - Ring: ruhige, durchgehende Linie in einer Farbe (Grundfarbe oder Alarm-Farbe der App/des Anrufs).
  */
 class EdgeLightRenderer {
 
@@ -74,13 +71,8 @@ class EdgeLightRenderer {
     private var paletteColors: IntArray = intArrayOf()
     private var ringSweep: SweepGradient? = null
     private val gradientMatrix = Matrix()
-    private var cachedPaletteId: Int = -1
-    private var cachedUseCustomColors: Boolean = false
-    private var cachedCustomColors: List<Long> = emptyList()
+    private var cachedResolved: List<Long> = emptyList()
 
-    // Masken-Arrays (wiederverwendet)
-    private val maskColors = IntArray(MAX_STOPS)
-    private val maskPositions = FloatArray(MAX_STOPS)
 
     // Zwei-Stufen-Start: erst Mehrfarb-Spektrum, dann weiche Überblendung in die Zielfarben
     private val introColors: IntArray = TWO_STAGE_INTRO_COLORS.map { it.toInt() }.toIntArray()
@@ -99,10 +91,6 @@ class EdgeLightRenderer {
         private const val AURA_LAYERS = 32
         private const val LITE_LAYERS = 12
         private const val GLOW_LAYERS = 20
-        private const val COMET_STOPS = 18
-        private const val RUNNING_COUNT = 10
-        private const val RUNNING_STOPS = 7
-        private const val MAX_STOPS = 96
         private const val CALLER_PULSE_HZ = 1.4f
         private const val INTRO_HOLD_S = 0.9f   // Stufe 1: Spektrum stehen lassen
         private const val INTRO_BLEND_S = 1.1f  // Stufe 2: weich in Zielfarben überblenden
@@ -124,40 +112,32 @@ class EdgeLightRenderer {
         buildBorderPaths(config)
     }
 
-    private fun invalidateColors(config: EdgeConfig) {
-        val raw: List<Long> = if (config.useCustomColors) {
+    /**
+     * Farbquelle: 1) Einzelfarbe des Alarms (App/Anruf), 2) Ring = Grundfarbe, 3) Aura = Palette/Verlauf.
+     */
+    private fun resolveColors(config: EdgeConfig): List<Long> {
+        config.colorOverride?.let { return listOf(it, it) }
+        if (config.lineStyle == LineStyle.RING) return listOf(config.ringColor, config.ringColor)
+        return if (config.useCustomColors) {
             config.customColors.ifEmpty { listOf(0xFF00E5FFL, 0xFFD500F9L) }
         } else {
             EdgeColorPalette.getPreset(config.selectedPaletteId).colors
         }
+    }
+
+    private fun invalidateColors(config: EdgeConfig) {
+        val raw = resolveColors(config)
         val closed = if (raw.first() != raw.last()) raw + raw.first() else raw
         paletteColors = closed.map { it.toInt() }.toIntArray()
         activeColors = paletteColors
-        cachedPaletteId = config.selectedPaletteId
-        cachedUseCustomColors = config.useCustomColors
-        cachedCustomColors = config.customColors
+        cachedResolved = raw
         if (width > 0f && height > 0f) {
             ringSweep = SweepGradient(cx, cy, paletteColors, null)
         }
     }
 
     private fun checkColorUpdate(config: EdgeConfig) {
-        val differ = config.selectedPaletteId != cachedPaletteId ||
-                config.useCustomColors != cachedUseCustomColors ||
-                (config.useCustomColors && config.customColors != cachedCustomColors) ||
-                ringSweep == null
-        if (differ) invalidateColors(config)
-    }
-
-    /** Palettenfarbe an Position u (0..1) im geschlossenen Verlauf, linear interpoliert. */
-    private fun paletteAt(u: Float): Int {
-        val c = activeColors
-        if (c.isEmpty()) return 0xFF00E5FF.toInt()
-        if (c.size == 1) return c[0]
-        val x = (((u % 1f) + 1f) % 1f) * (c.size - 1)
-        val i = floor(x).toInt().coerceIn(0, c.size - 2)
-        val f = x - i
-        return lerpColor(c[i], c[i + 1], f)
+        if (ringSweep == null || resolveColors(config) != cachedResolved) invalidateColors(config)
     }
 
     /** Farbe im Intro-Spektrum an Position u (0..1, geschlossen). */
@@ -198,9 +178,6 @@ class EdgeLightRenderer {
         fun ch(shift: Int) = (((a shr shift) and 0xFF) + (((b shr shift) and 0xFF) - ((a shr shift) and 0xFF)) * f).toInt()
         return (0xFF shl 24) or (ch(16) shl 16) or (ch(8) shl 8) or ch(0)
     }
-
-    private fun withAlpha(color: Int, alpha01: Float): Int =
-        ((alpha01.coerceIn(0f, 1f) * 255f).toInt() shl 24) or (color and 0x00FFFFFF)
 
     fun buildBorderPaths(config: EdgeConfig) {
         if (width <= 0f || height <= 0f) return
@@ -358,17 +335,6 @@ class EdgeLightRenderer {
         ringKeyReach = -1f // Ringe passend zur neuen Geometrie neu bauen
     }
 
-    /** Winkel (Grad) zur Bogenlänge s, auch außerhalb 0..Umfang (ganze Umläufe = ±360°). */
-    private fun angleAt(s: Float): Float {
-        val p = perimeter
-        val loops = floor(s / p)
-        val local = s - loops * p
-        val x = local / p * LUT_SIZE
-        val i = x.toInt().coerceIn(0, LUT_SIZE - 1)
-        val f = x - i
-        return angleLut[i] + (angleLut[i + 1] - angleLut[i]) * f + loops * (angleLut[LUT_SIZE] - angleLut[0])
-    }
-
     /**
      * Verschachtelte Lichtschichten: Schicht k reicht vom Rand bis Tiefe d_k = k/n · Reichweite.
      * Nur ihre Innenkante liegt im Bild und ist abgerundet (Radius wächst mit der Tiefe) → keine Nähte,
@@ -414,7 +380,8 @@ class EdgeLightRenderer {
 
         val alert = config.isCallerAlertActive
         val moves = config.animationMode != AnimationMode.PULSE || alert
-        val pulses = config.animationMode != AnimationMode.ROTATE || alert
+        // Ring leuchtet ruhig (kein Pulsieren); Puls/Atem nur für die KI-Aura
+        val pulses = config.lineStyle != LineStyle.RING && (config.animationMode != AnimationMode.ROTATE || alert)
 
         // Bewegung: 1x = eine Runde in 10 s
         if (moves) {
@@ -446,9 +413,6 @@ class EdgeLightRenderer {
                 sweep.setLocalMatrix(gradientMatrix)
                 sweep
             }
-            LineStyle.COMET -> cometShader(travel, config.tailLength, 1)
-            LineStyle.DUAL_COMET -> cometShader(travel, config.tailLength.coerceAtMost(0.45f), 2)
-            LineStyle.RUNNING_LIGHTS -> runningShader(travel)
         }
         linePaint.shader = shader
         ringPaint.shader = shader
@@ -459,13 +423,9 @@ class EdgeLightRenderer {
                 // hauchdünne Kante – definiert den Rand, ohne harte Kontur
                 drawLine(canvas, borderPath, thickness * 0.35f, baseAlpha * intensity * 0.55f)
             }
-            else -> {
-                // Maskierte Stile (Komet/Lauflicht): Schein flach halten, sonst entstehen Lichtkegel zur Bildmitte
-                val masked = config.lineStyle != LineStyle.RING
-                val glowReach = if (masked) min(reach * 0.35f, 48f).coerceAtLeast(thickness * 1.5f) else reach
-                if (glowOn) drawRings(canvas, glowReach, GLOW_LAYERS, if (masked) 0.75f else 0.6f, baseAlpha, intensity)
-                val path = if (config.lineStyle == LineStyle.RING) combinedPath else borderPath
-                drawLine(canvas, path, thickness, baseAlpha * intensity)
+            LineStyle.RING -> {
+                if (glowOn) drawRings(canvas, reach, GLOW_LAYERS, 0.6f, baseAlpha, intensity)
+                drawLine(canvas, combinedPath, thickness, baseAlpha * intensity)
             }
         }
     }
@@ -487,74 +447,5 @@ class EdgeLightRenderer {
             ringPaint.strokeWidth = ringWidths[k]
             canvas.drawPath(ringPaths[k], ringPaint)
         }
-    }
-
-    /**
-     * Komet(en) als Alpha-Maske im Farbverlauf. Stützstellen werden in Bogenlänge verteilt und über die
-     * Winkel-Tabelle umgerechnet → Schweiflänge und Tempo sind an allen Kanten gleich.
-     */
-    private fun cometShader(headFraction: Float, tailFraction: Float, count: Int): SweepGradient {
-        val p = perimeter
-        val tail = tailFraction.coerceIn(0.05f, 0.9f) * p
-        val lead = tail * 0.04f // weicher Kopf statt harter Abbruchkante
-        val spacing = p / count
-        val firstStart = headFraction * p - tail
-        val base = angleAt(firstStart)
-        var n = 0
-        for (c in 0 until count) {
-            val start = firstStart + c * spacing
-            for (i in 0..COMET_STOPS) {
-                val u = i.toFloat() / COMET_STOPS                      // 0 = Schweifende, 1 = Kopf
-                val s = start + u * tail
-                maskPositions[n] = ((angleAt(s) - base) / 360f).coerceIn(0f, 1f)
-                maskColors[n] = withAlpha(paletteAt(s / p), u * kotlin.math.sqrt(u)) // u^1,5 → langer, sichtbarer Schweif
-                n++
-            }
-            val sLead = start + tail + lead
-            maskPositions[n] = ((angleAt(sLead) - base) / 360f).coerceIn(0f, 1f)
-            maskColors[n] = withAlpha(paletteAt(sLead / p), 0f)
-            n++
-        }
-        return finishMask(n, base)
-    }
-
-    /** Lauflicht: weich ein- und ausblendende Lichtstriche, gleichmäßig über den Umfang verteilt. */
-    private fun runningShader(headFraction: Float): SweepGradient {
-        val p = perimeter
-        val unit = p / RUNNING_COUNT
-        val dash = unit * 0.5f
-        val firstStart = headFraction * p
-        val base = angleAt(firstStart)
-        var n = 0
-        for (c in 0 until RUNNING_COUNT) {
-            val start = firstStart + c * unit
-            for (i in 0..RUNNING_STOPS) {
-                val u = i.toFloat() / RUNNING_STOPS
-                val s = start + u * dash
-                val bump = sin(PI * u).toFloat()
-                maskPositions[n] = ((angleAt(s) - base) / 360f).coerceIn(0f, 1f)
-                maskColors[n] = withAlpha(paletteAt(s / p), bump * bump)
-                n++
-            }
-        }
-        return finishMask(n, base)
-    }
-
-    /** Schließt die Maske transparent bis 360° ab und dreht sie an die Basis-Position. */
-    private fun finishMask(count: Int, baseAngle: Float): SweepGradient {
-        var n = count
-        // Positionen strikt monoton halten (Gleichstände sind erlaubt)
-        for (i in 1 until n) if (maskPositions[i] < maskPositions[i - 1]) maskPositions[i] = maskPositions[i - 1]
-        if (n < MAX_STOPS) {
-            maskPositions[n] = 1f
-            maskColors[n] = maskColors[n - 1] and 0x00FFFFFF
-            n++
-        }
-        val colors = maskColors.copyOf(n)
-        val positions = maskPositions.copyOf(n)
-        val sg = SweepGradient(cx, cy, colors, positions)
-        gradientMatrix.setRotate(baseAngle, cx, cy)
-        sg.setLocalMatrix(gradientMatrix)
-        return sg
     }
 }
