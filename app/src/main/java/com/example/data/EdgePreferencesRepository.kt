@@ -21,6 +21,7 @@ import com.example.model.LightProfile
 import com.example.model.LightWhen
 import com.example.model.LineStyle
 import com.example.model.PulseCurve
+import com.example.model.RING_THICKNESS_PX
 import com.example.model.NotchConfig
 import com.example.model.NotchType
 import com.example.model.NotificationEdgeSettings
@@ -189,10 +190,10 @@ class EdgePreferencesRepository private constructor(context: Context) {
                 useCustomColors = prefs[Keys.USE_CUSTOM_COLORS] ?: false,
                 customColors = customColorsList,
                 lineStyle = lineStyle,
-                ringColor = prefs[Keys.RING_COLOR] ?: 0xFF00E5FFL,
-                callColor = prefs[Keys.CALL_COLOR] ?: 0xFF2F7BFFL,
+                ringColor = prefs[Keys.RING_COLOR] ?: 0xFF00FFFFL,
+                callColor = prefs[Keys.CALL_COLOR] ?: 0xFF0088FFL,
                 glowReach = prefs[Keys.GLOW_REACH] ?: 120f,
-                borderThickness = prefs[Keys.BORDER_THICKNESS] ?: 18f,
+                borderThickness = RING_THICKNESS_PX, // fest, nicht änderbar
                 animationSpeed = prefs[Keys.ANIMATION_SPEED] ?: 5f,
                 animationMode = try {
                     AnimationMode.valueOf(prefs[Keys.ANIMATION_MODE] ?: AnimationMode.ROTATE.name)
@@ -207,7 +208,7 @@ class EdgePreferencesRepository private constructor(context: Context) {
                 isTwoStageStartEnabled = prefs[Keys.TWO_STAGE_START] ?: false,
                 cornerRadiusTop = prefs[Keys.CORNER_RADIUS_TOP] ?: 70f,
                 cornerRadiusBottom = prefs[Keys.CORNER_RADIUS_BOTTOM] ?: 70f,
-                notchConfig = notchConfig,
+                notchConfig = NotchConfig(), // Kamera-Loch/Notch entfernt: immer gerader Rand
                 isGlowEnabled = prefs[Keys.GLOW_ENABLED] ?: true,
                 isCallerAlertActive = _callerAlertActive.value
             )

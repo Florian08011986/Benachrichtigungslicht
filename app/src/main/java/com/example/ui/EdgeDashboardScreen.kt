@@ -111,6 +111,7 @@ import com.example.ui.components.ColorSwatches
 import com.example.ui.components.AppColorRow
 import com.example.ui.components.AppColorDialog
 import com.example.model.LightWhen
+import com.example.model.RING_THICKNESS_PX
 import com.example.model.singleColor
 import com.example.util.InstalledApp
 import com.example.model.AnimationMode
@@ -152,7 +153,7 @@ fun EdgeDashboardScreen(
     var colorDialogForCalls by remember { mutableStateOf(false) }
 
     LaunchedEffect(selectedTab) {
-        if (selectedTab == 3) viewModel.loadInstalledApps()
+        if (selectedTab == 0) viewModel.loadInstalledApps()
     }
 
     // Farbauswahl-Dialoge
@@ -413,8 +414,66 @@ fun EdgeDashboardScreen(
                 }
             }
 
-            // TAB 0: FARBEN (48 PRESETS + EIGENER FARBDESIGNER)
+            // TAB 0: FARBEN – App-Farben zuerst, darunter Farbverläufe (für die KI-Aura)
             if (selectedTab == 0) {
+                // App-Farben: je App eine Farbe; Anrufe extra
+                item {
+                    Column {
+                        Text(
+                            text = "App-Farben",
+                            color = TextPrimary,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "Alle Apps auf deinem Handy. Tippe eine an und wähle ihre Farbe – ohne eigene Farbe leuchtet die Ring-Grundfarbe.",
+                            color = TextMuted,
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        AppColorRow(
+                            packageName = null,
+                            label = "Anrufe",
+                            color = config.callColor,
+                            fallbackColor = config.ringColor,
+                            onClick = { colorDialogForCalls = true }
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        OutlinedTextField(
+                            value = appSearch,
+                            onValueChange = { appSearch = it },
+                            placeholder = { Text("App suchen …") },
+                            singleLine = true,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("app_search")
+                        )
+                    }
+                }
+
+                val rulesByPackage = appRules.associateBy { it.packageName }
+                val visibleApps = installedApps.filter {
+                    appSearch.isBlank() || it.label.contains(appSearch, ignoreCase = true)
+                }.sortedByDescending { rulesByPackage.containsKey(it.packageName) } // Apps mit Farbe zuerst
+                items(visibleApps, key = { it.packageName }) { app ->
+                    AppColorRow(
+                        packageName = app.packageName,
+                        label = app.label,
+                        color = rulesByPackage[app.packageName]?.singleColor(),
+                        fallbackColor = config.ringColor,
+                        onClick = { colorDialogApp = app }
+                    )
+                }
+
+                item {
+                    Text(
+                        text = "Farbverläufe (nur für die KI-Aura)",
+                        color = TextPrimary,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(top = 12.dp)
+                    )
+                }
                 item {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -619,7 +678,7 @@ fun EdgeDashboardScreen(
                                 fontWeight = FontWeight.SemiBold
                             )
                             Text(
-                                text = "Gilt für alle Apps ohne eigene Farbe (App-Farben im Tab „4. Apps & VIP“)",
+                                text = "Gilt für alle Apps ohne eigene Farbe (App-Farben im Tab „1. Farben“)",
                                 color = TextMuted,
                                 style = MaterialTheme.typography.labelSmall
                             )
@@ -631,17 +690,9 @@ fun EdgeDashboardScreen(
                             )
                             Spacer(modifier = Modifier.height(16.dp))
                             Text(
-                                text = "Stärke: ${config.borderThickness.toInt()} px",
-                                color = TextPrimary,
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                            Slider(
-                                value = config.borderThickness.coerceIn(2f, 60f),
-                                onValueChange = { viewModel.updateGeometry(borderThickness = it) },
-                                valueRange = 2f..60f,
-                                colors = SliderDefaults.colors(thumbColor = Color(config.ringColor), activeTrackColor = Color(config.ringColor)),
-                                modifier = Modifier.testTag("ring_thickness_slider")
+                                text = "Stärke: ${RING_THICKNESS_PX.toInt()} px (fest)",
+                                color = TextSecondary,
+                                style = MaterialTheme.typography.bodyMedium
                             )
                         }
                     }
@@ -993,18 +1044,6 @@ fun EdgeDashboardScreen(
                             Spacer(modifier = Modifier.height(16.dp))
 
                             Text(
-                                text = "Randstärke: ${config.borderThickness.toInt()} px",
-                                color = TextPrimary,
-                                style = MaterialTheme.typography.bodyMedium
-                            )
-                            Slider(
-                                value = config.borderThickness,
-                                onValueChange = { viewModel.updateGeometry(borderThickness = it) },
-                                valueRange = 4f..60f,
-                                colors = SliderDefaults.colors(thumbColor = NeonCyan, activeTrackColor = NeonCyan)
-                            )
-
-                            Text(
                                 text = "Eckenradius Oben: ${config.cornerRadiusTop.toInt()} px",
                                 color = TextPrimary,
                                 style = MaterialTheme.typography.bodyMedium
@@ -1052,128 +1091,6 @@ fun EdgeDashboardScreen(
                                         checkedThumbColor = NeonCyan,
                                         checkedTrackColor = DarkSurfaceVariant
                                     )
-                                )
-                            }
-                        }
-                    }
-                }
-
-                item {
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(20.dp),
-                        colors = CardDefaults.cardColors(containerColor = DarkSurface),
-                        border = CardDefaults.outlinedCardBorder()
-                    ) {
-                        Column(modifier = Modifier.padding(16.dp)) {
-                            Text(
-                                text = "Notch- & Kamera-Aussparungen",
-                                color = TextPrimary,
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold
-                            )
-
-                            Spacer(modifier = Modifier.height(12.dp))
-
-                            FlowRow(
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalArrangement = Arrangement.spacedBy(8.dp),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                NotchType.values().forEach { notch ->
-                                    val isSelected = config.notchConfig.notchType == notch
-                                    FilterChip(
-                                        selected = isSelected,
-                                        onClick = {
-                                            viewModel.updateNotchConfig(config.notchConfig.copy(notchType = notch))
-                                        },
-                                        label = { Text(notch.displayName) },
-                                        colors = FilterChipDefaults.filterChipColors(
-                                            selectedContainerColor = NeonMagenta.copy(alpha = 0.2f),
-                                            selectedLabelColor = NeonMagenta,
-                                            containerColor = DarkSurfaceVariant,
-                                            labelColor = TextSecondary
-                                        ),
-                                        border = FilterChipDefaults.filterChipBorder(
-                                            borderColor = if (isSelected) NeonMagenta else DarkBorder,
-                                            enabled = true,
-                                            selected = isSelected
-                                        )
-                                    )
-                                }
-                            }
-
-                            if (config.notchConfig.notchType != NotchType.NONE) {
-                                Spacer(modifier = Modifier.height(16.dp))
-
-                                Text(
-                                    text = "Notch-Breite: ${config.notchConfig.notchWidth.toInt()} px",
-                                    color = TextPrimary,
-                                    style = MaterialTheme.typography.bodyMedium
-                                )
-                                Slider(
-                                    value = config.notchConfig.notchWidth,
-                                    onValueChange = {
-                                        viewModel.updateNotchConfig(config.notchConfig.copy(notchWidth = it))
-                                    },
-                                    valueRange = 40f..400f,
-                                    colors = SliderDefaults.colors(thumbColor = NeonMagenta, activeTrackColor = NeonMagenta)
-                                )
-
-                                Text(
-                                    text = "Notch-Höhe: ${config.notchConfig.notchHeight.toInt()} px",
-                                    color = TextPrimary,
-                                    style = MaterialTheme.typography.bodyMedium
-                                )
-                                Slider(
-                                    value = config.notchConfig.notchHeight,
-                                    onValueChange = {
-                                        viewModel.updateNotchConfig(config.notchConfig.copy(notchHeight = it))
-                                    },
-                                    valueRange = 20f..250f,
-                                    colors = SliderDefaults.colors(thumbColor = NeonMagenta, activeTrackColor = NeonMagenta)
-                                )
-
-                                Text(
-                                    text = "Horizontaler Versatz X: ${config.notchConfig.notchOffsetX.toInt()} px",
-                                    color = TextPrimary,
-                                    style = MaterialTheme.typography.bodyMedium
-                                )
-                                Slider(
-                                    value = config.notchConfig.notchOffsetX,
-                                    onValueChange = {
-                                        viewModel.updateNotchConfig(config.notchConfig.copy(notchOffsetX = it))
-                                    },
-                                    valueRange = -150f..150f,
-                                    colors = SliderDefaults.colors(thumbColor = NeonCyan, activeTrackColor = NeonCyan)
-                                )
-
-                                Text(
-                                    text = "Vertikaler Versatz Y: ${config.notchConfig.notchOffsetY.toInt()} px",
-                                    color = TextPrimary,
-                                    style = MaterialTheme.typography.bodyMedium
-                                )
-                                Slider(
-                                    value = config.notchConfig.notchOffsetY,
-                                    onValueChange = {
-                                        viewModel.updateNotchConfig(config.notchConfig.copy(notchOffsetY = it))
-                                    },
-                                    valueRange = 0f..80f,
-                                    colors = SliderDefaults.colors(thumbColor = NeonCyan, activeTrackColor = NeonCyan)
-                                )
-
-                                Text(
-                                    text = "Kurven- / Lochradius: ${config.notchConfig.notchRadius.toInt()} px",
-                                    color = TextPrimary,
-                                    style = MaterialTheme.typography.bodyMedium
-                                )
-                                Slider(
-                                    value = config.notchConfig.notchRadius,
-                                    onValueChange = {
-                                        viewModel.updateNotchConfig(config.notchConfig.copy(notchRadius = it))
-                                    },
-                                    valueRange = 6f..60f,
-                                    colors = SliderDefaults.colors(thumbColor = NeonCyan, activeTrackColor = NeonCyan)
                                 )
                             }
                         }
@@ -1429,54 +1346,6 @@ fun EdgeDashboardScreen(
                     }
                 }
 
-                // App-Farben: je App eine Farbe; Anrufe extra
-                item {
-                    Column {
-                        Text(
-                            text = "App-Farben",
-                            color = TextPrimary,
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Text(
-                            text = "Tippe auf eine App und wähle ihre Farbe. Ohne eigene Farbe leuchtet die Ring-Grundfarbe.",
-                            color = TextMuted,
-                            style = MaterialTheme.typography.labelSmall
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        AppColorRow(
-                            packageName = null,
-                            label = "Anrufe",
-                            color = config.callColor,
-                            fallbackColor = config.ringColor,
-                            onClick = { colorDialogForCalls = true }
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        OutlinedTextField(
-                            value = appSearch,
-                            onValueChange = { appSearch = it },
-                            placeholder = { Text("App suchen …") },
-                            singleLine = true,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .testTag("app_search")
-                        )
-                    }
-                }
-
-                val rulesByPackage = appRules.associateBy { it.packageName }
-                val visibleApps = installedApps.filter {
-                    appSearch.isBlank() || it.label.contains(appSearch, ignoreCase = true)
-                }.sortedByDescending { rulesByPackage.containsKey(it.packageName) } // Apps mit Farbe zuerst
-                items(visibleApps, key = { it.packageName }) { app ->
-                    AppColorRow(
-                        packageName = app.packageName,
-                        label = app.label,
-                        color = rulesByPackage[app.packageName]?.singleColor(),
-                        fallbackColor = config.ringColor,
-                        onClick = { colorDialogApp = app }
-                    )
-                }
 
                 item {
                     Spacer(modifier = Modifier.height(8.dp))

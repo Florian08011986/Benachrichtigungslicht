@@ -397,7 +397,8 @@ class EdgeLightRenderer {
             PulseMath.intensity(curve, PulseMath.level(curve, pulsePhase), if (alert) 0.5f else config.pulseStrength)
         } else 1f
 
-        val opacity = config.opacityPercent.coerceIn(10, 100) / 100f
+        // Ring immer voll deckend (intensive Farbe); Deckkraft-Regler nur für die KI-Aura
+        val opacity = if (config.lineStyle == LineStyle.RING) 1f else config.opacityPercent.coerceIn(10, 100) / 100f
         val baseAlpha = 255f * opacity * batteryDimMultiplier.coerceIn(0.1f, 1f)
         val glowOn = config.isGlowEnabled && !disableGlow
         val thickness = if (alert) config.borderThickness * 1.3f else config.borderThickness

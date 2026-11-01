@@ -13,20 +13,23 @@ enum class LightWhen(val displayName: String) {
     BOTH("Beides")
 }
 
-/** Auswahl-Farbfelder für Ring-, App- und Anruf-Farben (je eine Farbe). */
+/** Feste Ringbreite in px – nicht manuell änderbar. */
+const val RING_THICKNESS_PX: Float = 25f
+
+/** Auswahl-Farbfelder für Ring-, App- und Anruf-Farben – voll gesättigt für maximale Leuchtkraft. */
 val COLOR_SWATCHES: List<Long> = listOf(
-    0xFF25D366L, // Grün
-    0xFF00C853L, // Smaragd
-    0xFF00E5FFL, // Cyan
-    0xFF2F7BFFL, // Blau
-    0xFF1A3DFFL, // Königsblau
-    0xFF7C4DFFL, // Violett
-    0xFFD500F9L, // Magenta
-    0xFFFF4081L, // Pink
-    0xFFFF1744L, // Rot
-    0xFFFF6D00L, // Orange
-    0xFFD97757L, // Terrakotta
-    0xFFFFC400L, // Gelb
+    0xFF00FF00L, // Grün
+    0xFF00FF88L, // Mint
+    0xFF00FFFFL, // Cyan
+    0xFF0088FFL, // Blau
+    0xFF0000FFL, // Königsblau
+    0xFF8800FFL, // Violett
+    0xFFFF00FFL, // Magenta
+    0xFFFF0088L, // Pink
+    0xFFFF0000L, // Rot
+    0xFFFF4400L, // Orange-Rot
+    0xFFFF8800L, // Orange
+    0xFFFFEE00L, // Gelb
     0xFFFFFFFFL  // Weiß
 )
 
@@ -125,10 +128,10 @@ data class EdgeConfig(
     val useCustomColors: Boolean = false,
     val customColors: List<Long> = listOf(0xFF00E5FFL, 0xFFD500F9L, 0xFFFF1744L),
     val lineStyle: LineStyle = LineStyle.RING,
-    val ringColor: Long = 0xFF00E5FFL,  // Grundfarbe des Rings (Apps ohne eigene Farbe)
-    val callColor: Long = 0xFF2F7BFFL,  // Farbe bei eingehenden Anrufen
+    val ringColor: Long = 0xFF00FFFFL,  // Grundfarbe des Rings (Apps ohne eigene Farbe)
+    val callColor: Long = 0xFF0088FFL,  // Farbe bei eingehenden Anrufen
     val glowReach: Float = 120f,        // px, wie weit Glow/Aura ins Display reicht
-    val borderThickness: Float = 18f,   // px
+    val borderThickness: Float = RING_THICKNESS_PX, // px, fest
     val animationSpeed: Float = 5f,     // 0.2f..20f (Bewegungstempo, 1x = 36°/s)
     val animationMode: AnimationMode = AnimationMode.ROTATE,
     val pulseSpeed: Float = 0.5f,       // Pulse pro Sekunde, 0.125f..2f
