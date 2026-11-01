@@ -59,6 +59,11 @@ class EdgeLightRenderer {
         textAlign = Paint.Align.CENTER
     }
 
+    private val centerHeartPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+        color = 0xFFE5173A.toInt()
+    }
+
     // Gradient & Transform
     private var sweepGradient: SweepGradient? = null
     private val matrix = Matrix()
@@ -343,11 +348,30 @@ class EdgeLightRenderer {
         }
         val alertAlpha = (baseAlpha * userBrightness * batteryDimMultiplier.coerceIn(0.1f, 1.0f)).toInt().coerceIn(15, 255)
 
-        if (config.shapeType == BorderShapeType.CONTINUOUS_LINE) {
-            renderContinuousLine(canvas, config, alertAlpha, disableGlow)
-        } else {
-            renderBorderShapes(canvas, config, alertAlpha)
+        if (config.showBorder) {
+            if (config.shapeType == BorderShapeType.CONTINUOUS_LINE) {
+                renderContinuousLine(canvas, config, alertAlpha, disableGlow)
+            } else {
+                renderBorderShapes(canvas, config, alertAlpha)
+            }
         }
+
+        if (config.showCenterHeart) {
+            renderCenterHeart(canvas, nowNanos)
+        }
+    }
+
+    // Rotes, sanft pulsierendes Herz in der Displaymitte
+    private fun renderCenterHeart(canvas: Canvas, nowNanos: Long) {
+        val pulse = 1f + 0.08f * sin(nowNanos / 250_000_000.0).toFloat()
+        val radius = min(width, height) * 0.22f * pulse
+        // Die Herzvorlage reicht vertikal von ca. -0.1 bis 1.0, optische Mitte bei ca. 0.45
+        transformedShapePath.reset()
+        shapeMatrix.reset()
+        shapeMatrix.postScale(radius, radius)
+        shapeMatrix.postTranslate(width / 2f, height / 2f - 0.45f * radius)
+        heartTemplatePath.transform(shapeMatrix, transformedShapePath)
+        canvas.drawPath(transformedShapePath, centerHeartPaint)
     }
 
     private fun renderContinuousLine(

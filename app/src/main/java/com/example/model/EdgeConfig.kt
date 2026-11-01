@@ -46,5 +46,7 @@ data class EdgeConfig(
     val cornerRadiusBottom: Float = 70f,// px
     val notchConfig: NotchConfig = NotchConfig(),
     val isGlowEnabled: Boolean = true,
-    val isCallerAlertActive: Boolean = false // Set when phone is ringing
+    val isCallerAlertActive: Boolean = false, // Set when phone is ringing
+    val showCenterHeart: Boolean = false,     // Rotes Herz in der Displaymitte
+    val showBorder: Boolean = true            // false: nur Herz, kein Rand
 )

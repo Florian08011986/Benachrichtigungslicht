@@ -83,7 +83,8 @@ class EdgeDashboardViewModel(application: Application) : AndroidViewModel(applic
         customColors: List<Long>,
         shapeType: BorderShapeType,
         customEmoji: String,
-        durationSeconds: Int
+        durationSeconds: Int,
+        centerHeart: Boolean = false
     ) {
         val context = getApplication<Application>()
         EdgeOverlayService.triggerNotificationAlert(
@@ -94,7 +95,8 @@ class EdgeDashboardViewModel(application: Application) : AndroidViewModel(applic
             shapeType = shapeType.name,
             customEmoji = customEmoji,
             durationSeconds = durationSeconds,
-            wakeScreen = notificationSettings.value.wakeScreenOnNotification
+            wakeScreen = notificationSettings.value.wakeScreenOnNotification,
+            centerHeart = centerHeart
         )
     }
 

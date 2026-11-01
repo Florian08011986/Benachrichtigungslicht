@@ -482,7 +482,8 @@ class EdgePreferencesRepository private constructor(context: Context) {
                 r.customColors.joinToString(";"),
                 r.shapeType.name,
                 r.customEmoji.ifEmpty { " " },
-                r.durationSeconds
+                r.durationSeconds,
+                r.showCenterHeart
             ).joinToString("|||")
         }
     }
@@ -503,7 +504,8 @@ class EdgePreferencesRepository private constructor(context: Context) {
                     customColors = customCol,
                     shapeType = shape,
                     customEmoji = p[7].trim(),
-                    durationSeconds = p[8].toIntOrNull() ?: 8
+                    durationSeconds = p[8].toIntOrNull() ?: 8,
+                    showCenterHeart = p.getOrNull(9)?.trim()?.toBooleanStrictOrNull() ?: false
                 )
             } else null
         }

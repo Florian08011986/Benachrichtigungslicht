@@ -144,6 +144,7 @@ fun EdgeDashboardScreen(
     var showAddContactDialog by remember { mutableStateOf(false) }
     var newContactName by remember { mutableStateOf("") }
     var newContactPaletteId by remember { mutableIntStateOf(41) }
+    var newContactCenterHeart by remember { mutableStateOf(false) }
 
     // Overlay-Berechtigungs-Launcher
     val overlayPermissionLauncher = rememberLauncherForActivityResult(
@@ -987,7 +988,8 @@ fun EdgeDashboardScreen(
                                     customColors = rule.customColors,
                                     shapeType = rule.shapeType,
                                     customEmoji = rule.customEmoji,
-                                    durationSeconds = rule.durationSeconds
+                                    durationSeconds = rule.durationSeconds,
+                                    centerHeart = rule.showCenterHeart
                                 )
                             }
                         )
@@ -1449,6 +1451,27 @@ fun EdgeDashboardScreen(
                             )
                         }
                     }
+                    Spacer(modifier = Modifier.height(14.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "Rotes Herz in der Mitte (Sperrbildschirm), Rand in App-Farbe",
+                            color = TextSecondary,
+                            fontSize = 12.sp,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Switch(
+                            checked = newContactCenterHeart,
+                            onCheckedChange = { newContactCenterHeart = it },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = NeonMagenta,
+                                checkedTrackColor = DarkSurfaceVariant
+                            )
+                        )
+                    }
                 }
             },
             confirmButton = {
@@ -1461,10 +1484,12 @@ fun EdgeDashboardScreen(
                                     contactIdentifier = newContactName.trim(),
                                     paletteId = newContactPaletteId,
                                     shapeType = BorderShapeType.HEART,
-                                    durationSeconds = 8
+                                    durationSeconds = 8,
+                                    showCenterHeart = newContactCenterHeart
                                 )
                             )
                             newContactName = ""
+                            newContactCenterHeart = false
                             showAddContactDialog = false
                         }
                     },

@@ -60,7 +60,13 @@ class EdgeNotificationListenerService : NotificationListenerService() {
                             text.contains(rule.contactIdentifier, ignoreCase = true))
         }
 
-        if (matchedContact != null) {
+        // 2. App-Regel der absendenden App (bestimmt Randfarbe und Muster)
+        val matchedApp = appRules.firstOrNull { rule ->
+            rule.packageName == sbn.packageName && rule.isEnabled
+        }
+
+        // Normaler VIP-Kontakt ohne Herz: eigene Farbe und eigenes Muster (unverändertes Verhalten)
+        if (matchedContact != null && !matchedContact.showCenterHeart) {
             EdgeOverlayService.triggerNotificationAlert(
                 context = applicationContext,
                 paletteId = matchedContact.paletteId,
@@ -75,21 +81,23 @@ class EdgeNotificationListenerService : NotificationListenerService() {
             return
         }
 
-        // 2. Check for App-specific rule
-        val matchedApp = appRules.firstOrNull { rule ->
-            rule.packageName == sbn.packageName && rule.isEnabled
-        }
+        // Herz-Kontakt (egal in welcher App): Rand bleibt in der App-Farbe,
+        // das rote Herz erscheint nur bei gesperrtem Bildschirm in der Displaymitte.
+        val showHeart = matchedContact != null && isLocked
 
-        if (matchedApp != null) {
+        if (matchedApp != null || showHeart) {
+            val colorSource = matchedApp
             EdgeOverlayService.triggerNotificationAlert(
                 context = applicationContext,
-                paletteId = matchedApp.paletteId,
-                useCustomColors = matchedApp.useCustomColors,
-                customColorsCsv = matchedApp.customColors.joinToString(","),
-                shapeType = matchedApp.shapeType.name,
-                customEmoji = matchedApp.customEmoji,
-                durationSeconds = matchedApp.durationSeconds,
-                wakeScreen = wakeScreen
+                paletteId = colorSource?.paletteId ?: matchedContact!!.paletteId,
+                useCustomColors = colorSource?.useCustomColors ?: matchedContact!!.useCustomColors,
+                customColorsCsv = (colorSource?.customColors ?: matchedContact!!.customColors).joinToString(","),
+                shapeType = colorSource?.shapeType?.name ?: matchedContact!!.shapeType.name,
+                customEmoji = colorSource?.customEmoji ?: matchedContact!!.customEmoji,
+                durationSeconds = colorSource?.durationSeconds ?: matchedContact!!.durationSeconds,
+                wakeScreen = wakeScreen,
+                centerHeart = showHeart,
+                showBorder = colorSource != null
             )
             replaceNotificationOnLockScreen(sbn, isLocked)
         }

@@ -264,6 +264,37 @@ fun ContactRuleCard(
 
                 Spacer(modifier = Modifier.height(12.dp))
 
+                // Rotes Herz in der Mitte (Sperrbildschirm)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Rotes Herz in der Mitte (Sperrbildschirm)",
+                            color = TextPrimary,
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            text = "Rand behält die Farbe der App, in der der Kontakt schreibt",
+                            color = TextSecondary,
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                    }
+                    Switch(
+                        checked = rule.showCenterHeart,
+                        onCheckedChange = { onUpdate(rule.copy(showCenterHeart = it)) },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = NeonMagenta,
+                            checkedTrackColor = DarkSurfaceVariant
+                        )
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
                 // Duration Slider
                 Text(
                     text = "Leuchtdauer: ${rule.durationSeconds} Sekunden",

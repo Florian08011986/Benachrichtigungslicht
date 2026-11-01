@@ -67,6 +67,8 @@ class EdgeOverlayService : Service() {
         const val EXTRA_CUSTOM_EMOJI = "extra_custom_emoji"
         const val EXTRA_DURATION_SECONDS = "extra_duration_seconds"
         const val EXTRA_WAKE_SCREEN = "extra_wake_screen"
+        const val EXTRA_CENTER_HEART = "extra_center_heart"
+        const val EXTRA_SHOW_BORDER = "extra_show_border"
 
         fun startOverlay(context: Context) {
             val intent = Intent(context, EdgeOverlayService::class.java).apply {
@@ -97,7 +99,9 @@ class EdgeOverlayService : Service() {
             shapeType: String,
             customEmoji: String,
             durationSeconds: Int,
-            wakeScreen: Boolean
+            wakeScreen: Boolean,
+            centerHeart: Boolean = false,
+            showBorder: Boolean = true
         ) {
             val intent = Intent(context, EdgeOverlayService::class.java).apply {
                 action = ACTION_SHOW_NOTIF_ALERT
@@ -108,6 +112,8 @@ class EdgeOverlayService : Service() {
                 putExtra(EXTRA_CUSTOM_EMOJI, customEmoji)
                 putExtra(EXTRA_DURATION_SECONDS, durationSeconds)
                 putExtra(EXTRA_WAKE_SCREEN, wakeScreen)
+                putExtra(EXTRA_CENTER_HEART, centerHeart)
+                putExtra(EXTRA_SHOW_BORDER, showBorder)
             }
             startServiceCompat(context, intent)
         }
@@ -181,6 +187,8 @@ class EdgeOverlayService : Service() {
         val customEmoji = intent.getStringExtra(EXTRA_CUSTOM_EMOJI) ?: ""
         val durationSeconds = intent.getIntExtra(EXTRA_DURATION_SECONDS, 6).coerceIn(2, 30)
         val wakeScreen = intent.getBooleanExtra(EXTRA_WAKE_SCREEN, true)
+        val centerHeart = intent.getBooleanExtra(EXTRA_CENTER_HEART, false)
+        val showBorder = intent.getBooleanExtra(EXTRA_SHOW_BORDER, true)
 
         val customColors = customColorsCsv.split(",")
             .mapNotNull { it.trim().toLongOrNull() }
@@ -198,7 +206,9 @@ class EdgeOverlayService : Service() {
             customColors = if (useCustom && customColors.isNotEmpty()) customColors else baseConfig.customColors,
             shapeType = shape,
             customEmoji = customEmoji.ifBlank { baseConfig.customEmoji },
-            isCallerAlertActive = true
+            isCallerAlertActive = true,
+            showCenterHeart = centerHeart,
+            showBorder = showBorder
         )
 
         isTemporaryAlertActive = true

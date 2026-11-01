@@ -21,7 +21,9 @@ data class ContactEdgeRule(
     val customColors: List<Long> = emptyList(),
     val shapeType: BorderShapeType = BorderShapeType.HEART,
     val customEmoji: String = "💖",
-    val durationSeconds: Int = 8
+    val durationSeconds: Int = 8,
+    // Rotes Herz in der Displaymitte (nur gesperrter Bildschirm); der Rand folgt dann der App-Farbe
+    val showCenterHeart: Boolean = false
 )
 
 data class NotificationEdgeSettings(
