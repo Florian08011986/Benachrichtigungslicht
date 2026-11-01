@@ -1,12 +1,12 @@
 package com.example.service
 
+import android.app.KeyguardManager
 import android.app.Notification
 import android.content.Context
 import android.os.PowerManager
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import com.example.data.EdgePreferencesRepository
-import com.example.model.BorderShapeType
 
 class EdgeNotificationListenerService : NotificationListenerService() {
 
@@ -47,7 +47,11 @@ class EdgeNotificationListenerService : NotificationListenerService() {
 
         val contactRules = repository.contactRulesFlow.value
         val appRules = repository.appRulesFlow.value
-        val baseConfig = repository.configFlow.value
+
+        // Gesperrter Bildschirm: Ring muss sichtbar sein, daher Display immer aufwecken
+        val keyguardManager = getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
+        val isLocked = keyguardManager.isKeyguardLocked
+        val wakeScreen = notifSettings.wakeScreenOnNotification || isLocked
 
         // 1. Check for specific Contact match (in title or text)
         val matchedContact = contactRules.firstOrNull { rule ->
@@ -65,8 +69,9 @@ class EdgeNotificationListenerService : NotificationListenerService() {
                 shapeType = matchedContact.shapeType.name,
                 customEmoji = matchedContact.customEmoji,
                 durationSeconds = matchedContact.durationSeconds,
-                wakeScreen = notifSettings.wakeScreenOnNotification
+                wakeScreen = wakeScreen
             )
+            replaceNotificationOnLockScreen(sbn, isLocked)
             return
         }
 
@@ -84,21 +89,21 @@ class EdgeNotificationListenerService : NotificationListenerService() {
                 shapeType = matchedApp.shapeType.name,
                 customEmoji = matchedApp.customEmoji,
                 durationSeconds = matchedApp.durationSeconds,
-                wakeScreen = notifSettings.wakeScreenOnNotification
+                wakeScreen = wakeScreen
             )
-            return
+            replaceNotificationOnLockScreen(sbn, isLocked)
         }
 
-        // 3. Fallback to default user edge configuration
-        EdgeOverlayService.triggerNotificationAlert(
-            context = applicationContext,
-            paletteId = baseConfig.selectedPaletteId,
-            useCustomColors = baseConfig.useCustomColors,
-            customColorsCsv = baseConfig.customColors.joinToString(","),
-            shapeType = baseConfig.shapeType.name,
-            customEmoji = baseConfig.customEmoji,
-            durationSeconds = notifSettings.defaultAlertDurationSeconds,
-            wakeScreen = notifSettings.wakeScreenOnNotification
-        )
+        // Apps ohne eigene Regel sind nicht verknüpft: kein Licht, Benachrichtigung bleibt unangetastet.
+    }
+
+    // Auf dem Sperrbildschirm ersetzt das Licht die Benachrichtigung: Sie wird endgültig entfernt.
+    private fun replaceNotificationOnLockScreen(sbn: StatusBarNotification, isLocked: Boolean) {
+        if (!isLocked) return
+        try {
+            cancelNotification(sbn.key)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }
 }

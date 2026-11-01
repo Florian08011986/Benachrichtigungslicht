@@ -77,6 +77,7 @@ class EdgePreferencesRepository private constructor(context: Context) {
         val NOTIF_ONLY_SCREEN_OFF = booleanPreferencesKey("notif_only_screen_off")
         val APP_RULES_RAW = stringPreferencesKey("app_rules_raw")
         val CONTACT_RULES_RAW = stringPreferencesKey("contact_rules_raw")
+        val APP_RULES_MIGRATED_V2 = booleanPreferencesKey("app_rules_migrated_v2")
 
         // Schedule / DND Keys
         val SCHEDULE_ENABLED = booleanPreferencesKey("schedule_enabled")
@@ -235,6 +236,30 @@ class EdgePreferencesRepository private constructor(context: Context) {
             started = SharingStarted.Eagerly,
             initialValue = BatterySaverConfig()
         )
+
+    init {
+        migrateAppRulesToAllowedApps()
+    }
+
+    // Einmalig: gespeicherte App-Regeln auf die erlaubten Apps beschränken. Farben der behaltenen Regeln bleiben unverändert.
+    private fun migrateAppRulesToAllowedApps() {
+        scope.launch {
+            applicationContext.dataStore.edit { prefs ->
+                if (prefs[Keys.APP_RULES_MIGRATED_V2] == true) return@edit
+                val raw = prefs[Keys.APP_RULES_RAW]
+                val current = if (raw.isNullOrBlank()) {
+                    DefaultAppRules.getDefaultRules()
+                } else {
+                    deserializeAppRules(raw)
+                }
+                val kept = current.filter { it.packageName in DefaultAppRules.ALLOWED_PACKAGES }
+                prefs[Keys.APP_RULES_RAW] = serializeAppRules(
+                    if (kept.isEmpty()) DefaultAppRules.getDefaultRules() else kept
+                )
+                prefs[Keys.APP_RULES_MIGRATED_V2] = true
+            }
+        }
+    }
 
     fun updateOverlayEnabled(enabled: Boolean) {
         scope.launch {

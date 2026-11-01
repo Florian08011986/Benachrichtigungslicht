@@ -33,20 +33,21 @@ data class NotificationEdgeSettings(
 )
 
 object DefaultAppRules {
+
+    // Nur diese Apps sind mit dem Kantenlicht verknüpft. Alle anderen Apps lösen kein Licht aus.
+    val ALLOWED_PACKAGES: Set<String> = setOf(
+        "com.whatsapp",
+        "com.instagram.android",
+        "com.google.android.apps.messaging",
+        "com.google.android.gm"
+    )
+
     fun getDefaultRules(): List<AppEdgeRule> = listOf(
         AppEdgeRule(
             packageName = "com.whatsapp",
             appName = "WhatsApp",
             isEnabled = true,
             paletteId = 3, // Matrix / Neon Green
-            shapeType = BorderShapeType.CONTINUOUS_LINE,
-            durationSeconds = 6
-        ),
-        AppEdgeRule(
-            packageName = "org.telegram.messenger",
-            appName = "Telegram",
-            isEnabled = true,
-            paletteId = 2, // Electric Cyan
             shapeType = BorderShapeType.CONTINUOUS_LINE,
             durationSeconds = 6
         ),
@@ -73,14 +74,6 @@ object DefaultAppRules {
             paletteId = 41, // Blood Crimson
             shapeType = BorderShapeType.CONTINUOUS_LINE,
             durationSeconds = 5
-        ),
-        AppEdgeRule(
-            packageName = "com.snapchat.android",
-            appName = "Snapchat",
-            isEnabled = true,
-            paletteId = 42, // Acid Yellow
-            shapeType = BorderShapeType.SUN,
-            durationSeconds = 6
         )
     )
 }

@@ -101,9 +101,7 @@ import com.example.model.ContactEdgeRule
 import com.example.model.EdgeColorPalette
 import com.example.model.NotchType
 import com.example.ui.components.AppRuleCard
-import com.example.ui.components.ColorPresetItem
 import com.example.ui.components.ContactRuleCard
-import com.example.ui.components.CustomColorEditor
 import com.example.ui.components.EdgeScreenPreview
 import com.example.ui.theme.DarkBorder
 import com.example.ui.theme.DarkOledBg
@@ -135,7 +133,6 @@ fun EdgeDashboardScreen(
     val batteryStatus by viewModel.batteryStatus.collectAsState()
 
     var selectedTab by remember { mutableIntStateOf(0) }
-    var selectedCategory by remember { mutableStateOf("Alle") }
     var testingPulse by remember { mutableStateOf(false) }
 
     // Dialog: Neue App-Regel
@@ -304,7 +301,7 @@ fun EdgeDashboardScreen(
                 )
             }
 
-            // 5 Haupt-Tabs in deutscher Sprache
+            // 4 Haupt-Tabs in deutscher Sprache
             item {
                 ScrollableTabRow(
                     selectedTabIndex = selectedTab,
@@ -324,142 +321,32 @@ fun EdgeDashboardScreen(
                     Tab(
                         selected = selectedTab == 0,
                         onClick = { selectedTab = 0 },
-                        text = { Text("1. Farben") },
-                        icon = { Icon(Icons.Default.ColorLens, contentDescription = "Farben") }
+                        text = { Text("1. Formen") },
+                        icon = { Icon(Icons.Default.ShapeLine, contentDescription = "Formen") }
                     )
                     Tab(
                         selected = selectedTab == 1,
                         onClick = { selectedTab = 1 },
-                        text = { Text("2. Formen") },
-                        icon = { Icon(Icons.Default.ShapeLine, contentDescription = "Formen") }
+                        text = { Text("2. Geometrie & Helligkeit") },
+                        icon = { Icon(Icons.Default.RoundedCorner, contentDescription = "Geometrie & Helligkeit") }
                     )
                     Tab(
                         selected = selectedTab == 2,
                         onClick = { selectedTab = 2 },
-                        text = { Text("3. Geometrie & Helligkeit") },
-                        icon = { Icon(Icons.Default.RoundedCorner, contentDescription = "Geometrie & Helligkeit") }
+                        text = { Text("3. Apps & VIP") },
+                        icon = { Icon(Icons.Default.NotificationsActive, contentDescription = "Apps & VIP") }
                     )
                     Tab(
                         selected = selectedTab == 3,
                         onClick = { selectedTab = 3 },
-                        text = { Text("4. Apps & VIP") },
-                        icon = { Icon(Icons.Default.NotificationsActive, contentDescription = "Apps & VIP") }
-                    )
-                    Tab(
-                        selected = selectedTab == 4,
-                        onClick = { selectedTab = 4 },
-                        text = { Text("5. Ruhe & Akku") },
+                        text = { Text("4. Ruhe & Akku") },
                         icon = { Icon(Icons.Default.Schedule, contentDescription = "Ruhe & Akku") }
                     )
                 }
             }
 
-            // TAB 0: FARBEN (48 PRESETS + EIGENER FARBDESIGNER)
+            // TAB 0: RANDFORMEN
             if (selectedTab == 0) {
-                item {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "Eigener Farbdesigner",
-                            color = TextPrimary,
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Switch(
-                            checked = config.useCustomColors,
-                            onCheckedChange = { use ->
-                                if (use) {
-                                    viewModel.setCustomColors(config.customColors)
-                                } else {
-                                    viewModel.selectPreset(config.selectedPaletteId)
-                                }
-                            },
-                            colors = SwitchDefaults.colors(
-                                checkedThumbColor = NeonCyan,
-                                checkedTrackColor = DarkSurfaceVariant
-                            )
-                        )
-                    }
-                }
-
-                if (config.useCustomColors) {
-                    item {
-                        CustomColorEditor(
-                            colors = config.customColors,
-                            onColorsChanged = { viewModel.setCustomColors(it) }
-                        )
-                    }
-                }
-
-                item {
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = "48 kuratierte Neon- & RGB-Farbverläufe",
-                        color = TextPrimary,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-
-                // Kategorie-Filter-Chips auf Deutsch
-                item {
-                    val categories = listOf("Alle", "Neon", "Cosmic", "Elements", "Pastel", "Vibrant")
-                    LazyRow(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        items(categories) { cat ->
-                            FilterChip(
-                                selected = selectedCategory == cat,
-                                onClick = { selectedCategory = cat },
-                                label = { Text(cat) },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = NeonCyan.copy(alpha = 0.2f),
-                                    selectedLabelColor = NeonCyan,
-                                    containerColor = DarkSurface,
-                                    labelColor = TextSecondary
-                                ),
-                                border = FilterChipDefaults.filterChipBorder(
-                                    borderColor = if (selectedCategory == cat) NeonCyan else DarkBorder,
-                                    enabled = true,
-                                    selected = selectedCategory == cat
-                                )
-                            )
-                        }
-                    }
-                }
-
-                val filteredPresets = if (selectedCategory == "Alle") {
-                    EdgeColorPalette.PRESETS
-                } else {
-                    EdgeColorPalette.PRESETS.filter { it.category == selectedCategory }
-                }
-
-                items(filteredPresets.chunked(2)) { pair ->
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        for (preset in pair) {
-                            ColorPresetItem(
-                                preset = preset,
-                                isSelected = !config.useCustomColors && config.selectedPaletteId == preset.id,
-                                onSelect = { viewModel.selectPreset(preset.id) },
-                                modifier = Modifier.weight(1f)
-                            )
-                        }
-                        if (pair.size == 1) {
-                            Spacer(modifier = Modifier.weight(1f))
-                        }
-                    }
-                }
-            }
-
-            // TAB 1: RANDFORMEN
-            if (selectedTab == 1) {
                 item {
                     Card(
                         modifier = Modifier.fillMaxWidth(),
@@ -581,8 +468,8 @@ fun EdgeDashboardScreen(
                 }
             }
 
-            // TAB 2: GEOMETRIE & NOTCH
-            if (selectedTab == 2) {
+            // TAB 1: GEOMETRIE & NOTCH
+            if (selectedTab == 1) {
                 item {
                     Card(
                         modifier = Modifier.fillMaxWidth(),
@@ -840,8 +727,8 @@ fun EdgeDashboardScreen(
                 }
             }
 
-            // TAB 3: APPS & VIP-BENACHRICHTIGUNGEN
-            if (selectedTab == 3) {
+            // TAB 2: APPS & VIP-BENACHRICHTIGUNGEN
+            if (selectedTab == 2) {
                 if (!viewModel.isNotificationListenerEnabled()) {
                     item {
                         Card(
@@ -1108,8 +995,8 @@ fun EdgeDashboardScreen(
                 }
             }
 
-            // TAB 4: RUHEZEIT & AKKUSPARMODUS (ZEITPLAN / DND & BATTERY SAVER)
-            if (selectedTab == 4) {
+            // TAB 3: RUHEZEIT & AKKUSPARMODUS (ZEITPLAN / DND & BATTERY SAVER)
+            if (selectedTab == 3) {
                 // 1. Zeitplan & Ruhezeiten (Nicht stören / DND)
                 item {
                     val isInDndNow = scheduleConfig.isCurrentlyInDnd()
