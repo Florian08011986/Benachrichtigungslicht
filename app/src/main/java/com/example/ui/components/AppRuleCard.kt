@@ -47,7 +47,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.model.AppEdgeRule
-import com.example.model.BorderShapeType
+import com.example.model.LineStyle
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import com.example.model.EdgeColorPalette
 import com.example.ui.theme.DarkBorder
 import com.example.ui.theme.DarkSurface
@@ -57,6 +59,7 @@ import com.example.ui.theme.NeonMagenta
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun AppRuleCard(
     rule: AppEdgeRule,
@@ -229,35 +232,30 @@ fun AppRuleCard(
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-                // Border Shape Selection
+                // Linienstil-Auswahl
                 Text(
-                    text = "Muster: ${rule.shapeType.displayName}",
+                    text = "Linienstil: ${rule.lineStyle.displayName}",
                     color = TextSecondary,
                     style = MaterialTheme.typography.labelMedium
                 )
                 Spacer(modifier = Modifier.height(6.dp))
-                Row(
+                FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    listOf(
-                        BorderShapeType.CONTINUOUS_LINE,
-                        BorderShapeType.HEART,
-                        BorderShapeType.STAR,
-                        BorderShapeType.SUN
-                    ).forEach { shape ->
-                        val isSelected = rule.shapeType == shape
+                    LineStyle.entries.forEach { style ->
+                        val isSelected = rule.lineStyle == style
                         Box(
                             modifier = Modifier
-                                .weight(1f)
                                 .clip(RoundedCornerShape(8.dp))
                                 .background(if (isSelected) DarkSurfaceVariant else DarkBorder)
                                 .border(1.dp, if (isSelected) NeonCyan else Color.Transparent, RoundedCornerShape(8.dp))
-                            .clickable { onUpdate(rule.copy(shapeType = shape)) }
-                            .padding(vertical = 6.dp),
+                                .clickable { onUpdate(rule.copy(lineStyle = style)) }
+                                .padding(horizontal = 10.dp, vertical = 6.dp),
                             contentAlignment = Alignment.Center
                         ) {
-                            Text(shape.iconLabel, fontSize = 16.sp)
+                            Text(style.displayName, fontSize = 12.sp, color = if (isSelected) NeonCyan else TextSecondary)
                         }
                     }
                 }

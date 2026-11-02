@@ -79,6 +79,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -96,13 +97,26 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.example.model.AppEdgeRule
-import com.example.model.BorderShapeType
+import com.example.model.LineStyle
+import com.example.model.PulseCurve
 import com.example.model.ContactEdgeRule
 import com.example.model.EdgeColorPalette
 import com.example.model.NotchType
 import com.example.ui.components.AppRuleCard
+import com.example.ui.components.ColorPresetItem
 import com.example.ui.components.ContactRuleCard
-import com.example.ui.components.EdgeScreenPreview
+import com.example.ui.components.CustomColorEditor
+import com.example.ui.components.LivePreviewCard
+import com.example.ui.components.ColorSwatches
+import com.example.ui.components.AppColorRow
+import com.example.ui.components.AppColorDialog
+import com.example.model.LightWhen
+import com.example.model.RING_THICKNESS_PX
+import com.example.model.singleColor
+import com.example.util.InstalledApp
+import com.example.model.AnimationMode
+import com.example.model.LightProfiles
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import com.example.ui.theme.DarkBorder
 import com.example.ui.theme.DarkOledBg
 import com.example.ui.theme.DarkSurface
@@ -133,6 +147,40 @@ fun EdgeDashboardScreen(
     val batteryStatus by viewModel.batteryStatus.collectAsState()
 
     var selectedTab by remember { mutableIntStateOf(0) }
+    val installedApps by viewModel.installedApps.collectAsState()
+    var appSearch by remember { mutableStateOf("") }
+    var colorDialogApp by remember { mutableStateOf<InstalledApp?>(null) }
+    var colorDialogForCalls by remember { mutableStateOf(false) }
+
+    LaunchedEffect(selectedTab) {
+        if (selectedTab == 0) viewModel.loadInstalledApps()
+    }
+
+    // Farbauswahl-Dialoge
+    colorDialogApp?.let { app ->
+        val current = appRules.firstOrNull { it.packageName == app.packageName }?.singleColor()
+        AppColorDialog(
+            title = app.label,
+            current = current,
+            allowReset = true,
+            onSelect = { viewModel.setAppColor(app, it) },
+            onReset = { viewModel.clearAppColor(app.packageName) },
+            onTest = { viewModel.testAppColor(it) },
+            onDismiss = { colorDialogApp = null }
+        )
+    }
+    if (colorDialogForCalls) {
+        AppColorDialog(
+            title = "Anrufe",
+            current = config.callColor,
+            allowReset = false,
+            onSelect = { viewModel.setCallColor(it) },
+            onReset = {},
+            onTest = { viewModel.testAppColor(it) },
+            onDismiss = { colorDialogForCalls = false }
+        )
+    }
+    var selectedCategory by remember { mutableStateOf("Alle") }
     var testingPulse by remember { mutableStateOf(false) }
 
     // Dialog: Neue App-Regel
@@ -144,7 +192,6 @@ fun EdgeDashboardScreen(
     var showAddContactDialog by remember { mutableStateOf(false) }
     var newContactName by remember { mutableStateOf("") }
     var newContactPaletteId by remember { mutableIntStateOf(41) }
-    var newContactCenterHeart by remember { mutableStateOf(false) }
 
     // Overlay-Berechtigungs-Launcher
     val overlayPermissionLauncher = rememberLauncherForActivityResult(
@@ -182,6 +229,12 @@ fun EdgeDashboardScreen(
 
     val hasNotifAccess = viewModel.isNotificationListenerEnabled()
     val hasOverlayAccess = Settings.canDrawOverlays(context)
+
+    // Live-Vorschau nur solange die App im Vordergrund ist
+    LifecycleResumeEffect(config.isLivePreviewEnabled) {
+        if (config.isLivePreviewEnabled) viewModel.setPreviewActive(true)
+        onPauseOrDispose { viewModel.setPreviewActive(false) }
+    }
 
     Scaffold(
         topBar = {
@@ -236,9 +289,18 @@ fun EdgeDashboardScreen(
             contentPadding = PaddingValues(bottom = 32.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Live-Vorschau Karte
+            // Live-Vorschau am echten Display (ersetzt Mini-Handy)
             item {
-                EdgeScreenPreview(config = config)
+                LivePreviewCard(
+                    livePreviewEnabled = config.isLivePreviewEnabled,
+                    hasOverlayAccess = hasOverlayAccess,
+                    onToggle = { viewModel.setLivePreviewEnabled(it) },
+                    onRequestOverlayAccess = {
+                        overlayPermissionLauncher.launch(
+                            Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${context.packageName}"))
+                        )
+                    }
+                )
             }
 
             // Status- & Berechtigungs-Banner
@@ -302,7 +364,7 @@ fun EdgeDashboardScreen(
                 )
             }
 
-            // 4 Haupt-Tabs in deutscher Sprache
+            // 5 Haupt-Tabs in deutscher Sprache
             item {
                 ScrollableTabRow(
                     selectedTabIndex = selectedTab,
@@ -322,154 +384,199 @@ fun EdgeDashboardScreen(
                     Tab(
                         selected = selectedTab == 0,
                         onClick = { selectedTab = 0 },
-                        text = { Text("1. Formen") },
-                        icon = { Icon(Icons.Default.ShapeLine, contentDescription = "Formen") }
+                        text = { Text("1. Farben") },
+                        icon = { Icon(Icons.Default.ColorLens, contentDescription = "Farben") }
                     )
                     Tab(
                         selected = selectedTab == 1,
                         onClick = { selectedTab = 1 },
-                        text = { Text("2. Geometrie & Helligkeit") },
-                        icon = { Icon(Icons.Default.RoundedCorner, contentDescription = "Geometrie & Helligkeit") }
+                        text = { Text("2. Stil & Bewegung") },
+                        icon = { Icon(Icons.Default.ShapeLine, contentDescription = "Formen") }
                     )
                     Tab(
                         selected = selectedTab == 2,
                         onClick = { selectedTab = 2 },
-                        text = { Text("3. Apps & VIP") },
-                        icon = { Icon(Icons.Default.NotificationsActive, contentDescription = "Apps & VIP") }
+                        text = { Text("3. Geometrie & Helligkeit") },
+                        icon = { Icon(Icons.Default.RoundedCorner, contentDescription = "Geometrie & Helligkeit") }
                     )
                     Tab(
                         selected = selectedTab == 3,
                         onClick = { selectedTab = 3 },
-                        text = { Text("4. Ruhe & Akku") },
+                        text = { Text("4. Apps & VIP") },
+                        icon = { Icon(Icons.Default.NotificationsActive, contentDescription = "Apps & VIP") }
+                    )
+                    Tab(
+                        selected = selectedTab == 4,
+                        onClick = { selectedTab = 4 },
+                        text = { Text("5. Ruhe & Akku") },
                         icon = { Icon(Icons.Default.Schedule, contentDescription = "Ruhe & Akku") }
                     )
                 }
             }
 
-            // TAB 0: RANDFORMEN
+            // TAB 0: FARBEN – App-Farben zuerst, darunter Farbverläufe (für die KI-Aura)
             if (selectedTab == 0) {
+                // App-Farben: je App eine Farbe; Anrufe extra
                 item {
-                    Card(
+                    Column {
+                        Text(
+                            text = "App-Farben",
+                            color = TextPrimary,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "Alle Apps auf deinem Handy. Tippe eine an und wähle ihre Farbe – ohne eigene Farbe leuchtet die Ring-Grundfarbe.",
+                            color = TextMuted,
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        AppColorRow(
+                            packageName = null,
+                            label = "Anrufe",
+                            color = config.callColor,
+                            fallbackColor = config.ringColor,
+                            onClick = { colorDialogForCalls = true }
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        OutlinedTextField(
+                            value = appSearch,
+                            onValueChange = { appSearch = it },
+                            placeholder = { Text("App suchen …") },
+                            singleLine = true,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("app_search")
+                        )
+                    }
+                }
+
+                val rulesByPackage = appRules.associateBy { it.packageName }
+                val visibleApps = installedApps.filter {
+                    appSearch.isBlank() || it.label.contains(appSearch, ignoreCase = true)
+                }.sortedByDescending { rulesByPackage.containsKey(it.packageName) } // Apps mit Farbe zuerst
+                items(visibleApps, key = { it.packageName }) { app ->
+                    AppColorRow(
+                        packageName = app.packageName,
+                        label = app.label,
+                        color = rulesByPackage[app.packageName]?.singleColor(),
+                        fallbackColor = config.ringColor,
+                        onClick = { colorDialogApp = app }
+                    )
+                }
+
+                item {
+                    Text(
+                        text = "Farbverläufe (nur für die KI-Aura)",
+                        color = TextPrimary,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(top = 12.dp)
+                    )
+                }
+                item {
+                    Row(
                         modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(20.dp),
-                        colors = CardDefaults.cardColors(containerColor = DarkSurface),
-                        border = CardDefaults.outlinedCardBorder()
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column(modifier = Modifier.padding(16.dp)) {
-                            Text(
-                                text = "Randform auswählen",
-                                color = TextPrimary,
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold
-                            )
-
-                            Spacer(modifier = Modifier.height(12.dp))
-
-                            FlowRow(
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalArrangement = Arrangement.spacedBy(8.dp),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                BorderShapeType.values().forEach { shape ->
-                                    val isSelected = config.shapeType == shape
-                                    FilterChip(
-                                        selected = isSelected,
-                                        onClick = { viewModel.setShapeType(shape) },
-                                        label = {
-                                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                                Text(text = shape.iconLabel, fontSize = 16.sp)
-                                                Spacer(modifier = Modifier.width(6.dp))
-                                                Text(text = shape.displayName)
-                                            }
-                                        },
-                                        colors = FilterChipDefaults.filterChipColors(
-                                            selectedContainerColor = NeonCyan.copy(alpha = 0.2f),
-                                            selectedLabelColor = NeonCyan,
-                                            containerColor = DarkSurfaceVariant,
-                                            labelColor = TextSecondary
-                                        ),
-                                        border = FilterChipDefaults.filterChipBorder(
-                                            borderColor = if (isSelected) NeonCyan else DarkBorder,
-                                            enabled = true,
-                                            selected = isSelected
-                                        )
-                                    )
+                        Text(
+                            text = "Eigener Farbdesigner",
+                            color = TextPrimary,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Switch(
+                            checked = config.useCustomColors,
+                            onCheckedChange = { use ->
+                                if (use) {
+                                    viewModel.setCustomColors(config.customColors)
+                                } else {
+                                    viewModel.selectPreset(config.selectedPaletteId)
                                 }
-                            }
-
-                            AnimatedVisibility(visible = config.shapeType == BorderShapeType.CUSTOM_EMOJI) {
-                                Column(modifier = Modifier.padding(top = 16.dp)) {
-                                    Text(
-                                        text = "Eigenes Emoji / Symbol eingeben",
-                                        color = TextSecondary,
-                                        style = MaterialTheme.typography.labelMedium
-                                    )
-                                    Spacer(modifier = Modifier.height(6.dp))
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
-                                        OutlinedTextField(
-                                            value = config.customEmoji,
-                                            onValueChange = {
-                                                if (it.length <= 4) viewModel.setShapeType(BorderShapeType.CUSTOM_EMOJI, it)
-                                            },
-                                            modifier = Modifier.width(100.dp),
-                                            singleLine = true
-                                        )
-                                        listOf("⚡", "🔥", "🚀", "🌸", "🦋", "💀", "👾", "✨").forEach { quickEmoji ->
-                                            Box(
-                                                modifier = Modifier
-                                                    .size(36.dp)
-                                                    .clip(CircleShape)
-                                                    .background(DarkSurfaceVariant)
-                                                    .clickable {
-                                                        viewModel.setShapeType(BorderShapeType.CUSTOM_EMOJI, quickEmoji)
-                                                    },
-                                                contentAlignment = Alignment.Center
-                                            ) {
-                                                Text(quickEmoji, fontSize = 18.sp)
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
-                            Spacer(modifier = Modifier.height(20.dp))
-
-                            Text(
-                                text = "Formengröße: ${config.shapeSize.toInt()} px",
-                                color = TextPrimary,
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.SemiBold
+                            },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = NeonCyan,
+                                checkedTrackColor = DarkSurfaceVariant
                             )
-                            Slider(
-                                value = config.shapeSize,
-                                onValueChange = { viewModel.setShapeParameters(it, config.shapeSpacing) },
-                                valueRange = 16f..72f,
-                                colors = SliderDefaults.colors(thumbColor = NeonCyan, activeTrackColor = NeonCyan)
-                            )
+                        )
+                    }
+                }
 
-                            Spacer(modifier = Modifier.height(8.dp))
+                if (config.useCustomColors) {
+                    item {
+                        CustomColorEditor(
+                            colors = config.customColors,
+                            onColorsChanged = { viewModel.setCustomColors(it) }
+                        )
+                    }
+                }
 
-                            Text(
-                                text = "Formenabstand: ${config.shapeSpacing.toInt()} px",
-                                color = TextPrimary,
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.SemiBold
+                item {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "48 kuratierte Neon- & RGB-Farbverläufe",
+                        color = TextPrimary,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                // Kategorie-Filter-Chips auf Deutsch
+                item {
+                    val categories = listOf("Alle", "KI", "Neon", "Cosmic", "Elements", "Pastel", "Vibrant")
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        items(categories) { cat ->
+                            FilterChip(
+                                selected = selectedCategory == cat,
+                                onClick = { selectedCategory = cat },
+                                label = { Text(cat) },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = NeonCyan.copy(alpha = 0.2f),
+                                    selectedLabelColor = NeonCyan,
+                                    containerColor = DarkSurface,
+                                    labelColor = TextSecondary
+                                ),
+                                border = FilterChipDefaults.filterChipBorder(
+                                    borderColor = if (selectedCategory == cat) NeonCyan else DarkBorder,
+                                    enabled = true,
+                                    selected = selectedCategory == cat
+                                )
                             )
-                            Slider(
-                                value = config.shapeSpacing,
-                                onValueChange = { viewModel.setShapeParameters(config.shapeSize, it) },
-                                valueRange = 10f..100f,
-                                colors = SliderDefaults.colors(thumbColor = NeonMagenta, activeTrackColor = NeonMagenta)
+                        }
+                    }
+                }
+
+                val filteredPresets = if (selectedCategory == "Alle") {
+                    EdgeColorPalette.PRESETS
+                } else {
+                    EdgeColorPalette.PRESETS.filter { it.category == selectedCategory }
+                }
+
+                items(filteredPresets.chunked(2)) { pair ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        for (preset in pair) {
+                            ColorPresetItem(
+                                preset = preset,
+                                isSelected = !config.useCustomColors && config.selectedPaletteId == preset.id,
+                                onSelect = { viewModel.selectPreset(preset.id) },
+                                modifier = Modifier.weight(1f)
                             )
+                        }
+                        if (pair.size == 1) {
+                            Spacer(modifier = Modifier.weight(1f))
                         }
                     }
                 }
             }
 
-            // TAB 1: GEOMETRIE & NOTCH
+            // TAB 1: LINIENSTIL & BEWEGUNG
             if (selectedTab == 1) {
                 item {
                     Card(
@@ -480,76 +587,461 @@ fun EdgeDashboardScreen(
                     ) {
                         Column(modifier = Modifier.padding(16.dp)) {
                             Text(
-                                text = "Rand-Geometrie & Leuchtstärke",
+                                text = "Linienstil",
+                                color = TextPrimary,
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "Alle Stile laufen am Bildschirmrand entlang.",
+                                color = TextMuted,
+                                style = MaterialTheme.typography.labelSmall
+                            )
+                            Spacer(modifier = Modifier.height(10.dp))
+
+                            LineStyle.entries.forEach { style ->
+                                val isSelected = config.lineStyle == style
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 3.dp)
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(if (isSelected) NeonCyan.copy(alpha = 0.12f) else DarkSurfaceVariant)
+                                        .border(1.dp, if (isSelected) NeonCyan else DarkBorder, RoundedCornerShape(12.dp))
+                                        .clickable { viewModel.updateLineStyle(lineStyle = style) }
+                                        .padding(horizontal = 12.dp, vertical = 10.dp)
+                                        .testTag("line_style_${style.name}"),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = style.displayName,
+                                            color = if (isSelected) NeonCyan else TextPrimary,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                        Text(
+                                            text = style.description,
+                                            color = TextSecondary,
+                                            style = MaterialTheme.typography.bodySmall
+                                        )
+                                    }
+                                    if (isSelected) {
+                                        Icon(Icons.Default.CheckCircle, contentDescription = "Aktiv", tint = NeonCyan)
+                                    }
+                                }
+                            }
+
+                            if (config.lineStyle == LineStyle.AURA) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "Leucht-Reichweite ins Display: ${config.glowReach.toInt()} px",
+                                color = TextPrimary,
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                            Text(
+                                text = "Wie weit Aura und Leuchtschein vom Rand nach innen ziehen",
+                                color = TextMuted,
+                                style = MaterialTheme.typography.labelSmall
+                            )
+                            Slider(
+                                value = config.glowReach.coerceIn(20f, 400f),
+                                onValueChange = { viewModel.updateLineStyle(glowReach = it) },
+                                valueRange = 20f..400f,
+                                colors = SliderDefaults.colors(thumbColor = NeonCyan, activeTrackColor = NeonCyan),
+                                modifier = Modifier.testTag("glow_reach_slider")
+                            )
+                            }
+                        }
+                    }
+                }
+
+                // Ring: nur Farbe und Stärke
+                if (config.lineStyle == LineStyle.RING) item {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(20.dp),
+                        colors = CardDefaults.cardColors(containerColor = DarkSurface),
+                        border = CardDefaults.outlinedCardBorder()
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Text(
+                                text = "Ring",
+                                color = TextPrimary,
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Text(
+                                text = "Farbe",
+                                color = TextPrimary,
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                text = "Gilt für alle Apps ohne eigene Farbe (App-Farben im Tab „1. Farben“)",
+                                color = TextMuted,
+                                style = MaterialTheme.typography.labelSmall
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            ColorSwatches(
+                                selected = config.ringColor,
+                                onSelect = { viewModel.setRingColor(it) },
+                                modifier = Modifier.testTag("ring_color_swatches")
+                            )
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Text(
+                                text = "Stärke: ${RING_THICKNESS_PX.toInt()} px (fest)",
+                                color = TextSecondary,
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                        }
+                    }
+                }
+
+                // Wann leuchten (gilt für Ring und KI-Aura)
+                item {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(20.dp),
+                        colors = CardDefaults.cardColors(containerColor = DarkSurface),
+                        border = CardDefaults.outlinedCardBorder()
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Text(
+                                text = "Wann leuchten",
+                                color = TextPrimary,
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            FlowRow(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                LightWhen.entries.forEach { option ->
+                                    FilterChip(
+                                        selected = notifSettings.lightWhen == option,
+                                        onClick = { viewModel.updateNotificationSettings(notifSettings.copy(lightWhen = option)) },
+                                        label = { Text(option.displayName) },
+                                        colors = FilterChipDefaults.filterChipColors(
+                                            selectedContainerColor = NeonCyan.copy(alpha = 0.25f),
+                                            selectedLabelColor = NeonCyan,
+                                            labelColor = TextSecondary
+                                        ),
+                                        modifier = Modifier.testTag("light_when_${option.name}")
+                                    )
+                                }
+                            }
+                            Text(
+                                text = when (notifSettings.lightWhen) {
+                                    LightWhen.SCREEN_ACTIVE -> "Nur wenn das Handy entsperrt ist und du es benutzt"
+                                    LightWhen.LOCKED -> "Nur wenn das Handy gesperrt oder der Bildschirm aus ist"
+                                    LightWhen.BOTH -> "Immer – entsperrt und gesperrt"
+                                },
+                                color = TextMuted,
+                                style = MaterialTheme.typography.labelSmall,
+                                modifier = Modifier.padding(top = 6.dp)
+                            )
+                        }
+                    }
+                }
+
+                // Deckkraft (nur KI-Aura)
+                if (config.lineStyle == LineStyle.AURA) item {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(20.dp),
+                        colors = CardDefaults.cardColors(containerColor = DarkSurface),
+                        border = CardDefaults.outlinedCardBorder()
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "Deckkraft",
+                                    color = TextPrimary,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = "${config.opacityPercent} %",
+                                    color = NeonCyan,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            Text(
+                                text = "100 % = Rand verdeckt den Inhalt darunter vollständig. Weniger = durchscheinend.",
+                                color = TextMuted,
+                                style = MaterialTheme.typography.labelSmall
+                            )
+                            Slider(
+                                value = config.opacityPercent.toFloat(),
+                                onValueChange = { viewModel.updateOpacity(it.toInt()) },
+                                valueRange = 10f..100f,
+                                colors = SliderDefaults.colors(thumbColor = NeonCyan, activeTrackColor = NeonCyan),
+                                modifier = Modifier.testTag("opacity_slider")
+                            )
+                        }
+                    }
+                }
+
+                // Bewegung & Puls (nur KI-Aura)
+                if (config.lineStyle == LineStyle.AURA) item {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(20.dp),
+                        colors = CardDefaults.cardColors(containerColor = DarkSurface),
+                        border = CardDefaults.outlinedCardBorder()
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Text(
+                                text = "Bewegung & Puls",
+                                color = TextPrimary,
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            FlowRow(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                AnimationMode.entries.forEach { mode ->
+                                    FilterChip(
+                                        selected = config.animationMode == mode,
+                                        onClick = { viewModel.updateMotion(animationMode = mode) },
+                                        label = { Text(mode.displayName) },
+                                        colors = FilterChipDefaults.filterChipColors(
+                                            selectedContainerColor = ElectricPurple,
+                                            selectedLabelColor = TextPrimary,
+                                            labelColor = TextSecondary
+                                        ),
+                                        modifier = Modifier.testTag("motion_mode_${mode.name}")
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            val moveEnabled = config.animationMode != AnimationMode.PULSE
+                            Text(
+                                text = "Bewegungstempo: ${String.format("%.1f", config.animationSpeed)}x" +
+                                        "  (eine Runde in ${String.format("%.1f", 10f / config.animationSpeed)} s)",
+                                color = if (moveEnabled) TextPrimary else TextMuted,
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                            Slider(
+                                value = config.animationSpeed.coerceIn(0.2f, 20f),
+                                onValueChange = { viewModel.updateGeometry(animationSpeed = it) },
+                                valueRange = 0.2f..20f,
+                                enabled = moveEnabled,
+                                colors = SliderDefaults.colors(thumbColor = ElectricPurple, activeTrackColor = ElectricPurple),
+                                modifier = Modifier.testTag("rotation_speed_slider")
+                            )
+
+                            val pulseEnabled = config.animationMode != AnimationMode.ROTATE
+                            Text(
+                                text = "Pulskurve",
+                                color = if (pulseEnabled) TextPrimary else TextMuted,
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            FlowRow(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                PulseCurve.entries.forEach { curve ->
+                                    FilterChip(
+                                        selected = config.pulseCurve == curve,
+                                        enabled = pulseEnabled,
+                                        onClick = { viewModel.updateMotion(pulseCurve = curve) },
+                                        label = { Text(curve.displayName) },
+                                        colors = FilterChipDefaults.filterChipColors(
+                                            selectedContainerColor = NeonCyan.copy(alpha = 0.25f),
+                                            selectedLabelColor = NeonCyan,
+                                            labelColor = TextSecondary
+                                        ),
+                                        modifier = Modifier.testTag("pulse_curve_${curve.name}")
+                                    )
+                                }
+                            }
+                            Text(
+                                text = config.pulseCurve.description,
+                                color = TextMuted,
+                                style = MaterialTheme.typography.labelSmall
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = "Pulstempo: ein Atemzug alle ${String.format("%.1f", 1f / config.pulseSpeed)} s",
+                                color = if (pulseEnabled) TextPrimary else TextMuted,
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                            Slider(
+                                value = config.pulseSpeed.coerceIn(0.125f, 2f),
+                                onValueChange = { viewModel.updateMotion(pulseSpeed = it) },
+                                valueRange = 0.125f..2f,
+                                enabled = pulseEnabled,
+                                colors = SliderDefaults.colors(thumbColor = NeonCyan, activeTrackColor = NeonCyan),
+                                modifier = Modifier.testTag("pulse_speed_slider")
+                            )
+                            Text(
+                                text = "Pulsstärke: ${(config.pulseStrength * 100).toInt()} %",
+                                color = if (pulseEnabled) TextPrimary else TextMuted,
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                            Text(
+                                text = "Wie stark das Licht beim Ausatmen abtaucht – niedrig = ruhiger",
+                                color = TextMuted,
+                                style = MaterialTheme.typography.labelSmall
+                            )
+                            Slider(
+                                value = config.pulseStrength.coerceIn(0.1f, 1f),
+                                onValueChange = { viewModel.updateMotion(pulseStrength = it) },
+                                valueRange = 0.1f..1f,
+                                enabled = pulseEnabled,
+                                colors = SliderDefaults.colors(thumbColor = NeonCyan, activeTrackColor = NeonCyan),
+                                modifier = Modifier.testTag("pulse_strength_slider")
+                            )
+
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "Zwei-Stufen-Start",
+                                        color = TextPrimary,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    Text(
+                                        text = "Beim Auslösen kurz ein buntes Spektrum, dann weicher Übergang in deine Farben",
+                                        color = TextMuted,
+                                        style = MaterialTheme.typography.labelSmall
+                                    )
+                                }
+                                Switch(
+                                    checked = config.isTwoStageStartEnabled,
+                                    onCheckedChange = { viewModel.setTwoStageStartEnabled(it) },
+                                    colors = SwitchDefaults.colors(
+                                        checkedThumbColor = NeonCyan,
+                                        checkedTrackColor = DarkSurfaceVariant
+                                    ),
+                                    modifier = Modifier.testTag("two_stage_switch")
+                                )
+                            }
+                            TextButton(
+                                onClick = { viewModel.replayIntro() },
+                                modifier = Modifier.testTag("two_stage_replay")
+                            ) {
+                                Icon(Icons.Default.PlayArrow, contentDescription = null, tint = NeonCyan)
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Start-Effekt am Display ansehen", color = NeonCyan)
+                            }
+                        }
+                    }
+                }
+            }
+
+            // TAB 2: GEOMETRIE & NOTCH
+            if (selectedTab == 2) {
+                // Komplettprofile: Farbe + Bewegung + Rand mit einem Tipp
+                item {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(20.dp),
+                        colors = CardDefaults.cardColors(containerColor = DarkSurface),
+                        border = CardDefaults.outlinedCardBorder()
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Text(
+                                text = "Licht- & Pulsprofile",
+                                color = TextPrimary,
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "Setzt Stil, Farben, Bewegung, Puls und Randstärke auf einmal – danach frei anpassbar.",
+                                color = TextMuted,
+                                style = MaterialTheme.typography.labelSmall
+                            )
+                            Spacer(modifier = Modifier.height(10.dp))
+                            LightProfiles.ALL.forEach { profile ->
+                                val preset = EdgeColorPalette.getPreset(profile.paletteId)
+                                val isActive = !config.useCustomColors &&
+                                        config.selectedPaletteId == profile.paletteId &&
+                                        config.animationMode == profile.animationMode &&
+                                        config.lineStyle == profile.lineStyle
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 4.dp)
+                                        .clip(RoundedCornerShape(14.dp))
+                                        .background(DarkSurfaceVariant)
+                                        .border(
+                                            1.dp,
+                                            if (isActive) NeonCyan else DarkBorder,
+                                            RoundedCornerShape(14.dp)
+                                        )
+                                        .clickable { viewModel.applyLightProfile(profile) }
+                                        .padding(12.dp)
+                                        .testTag("light_profile_${profile.id}"),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(width = 10.dp, height = 40.dp)
+                                            .clip(RoundedCornerShape(5.dp))
+                                            .background(
+                                                androidx.compose.ui.graphics.Brush.verticalGradient(
+                                                    preset.colors.map { Color(it) }
+                                                )
+                                            )
+                                    )
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = profile.name,
+                                            color = TextPrimary,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                        Text(
+                                            text = profile.description,
+                                            color = TextSecondary,
+                                            style = MaterialTheme.typography.bodySmall
+                                        )
+                                    }
+                                    if (isActive) {
+                                        Icon(
+                                            imageVector = Icons.Default.CheckCircle,
+                                            contentDescription = "Aktiv",
+                                            tint = NeonCyan
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                item {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(20.dp),
+                        colors = CardDefaults.cardColors(containerColor = DarkSurface),
+                        border = CardDefaults.outlinedCardBorder()
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Text(
+                                text = "Rand-Geometrie",
                                 color = TextPrimary,
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold
                             )
 
                             Spacer(modifier = Modifier.height(16.dp))
-
-                            // Helligkeits-Regler (10% bis 100%)
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(
-                                        imageVector = Icons.Default.Brightness6,
-                                        contentDescription = null,
-                                        tint = NeonCyan,
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(
-                                        text = "Leucht-Helligkeit",
-                                        color = TextPrimary,
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        fontWeight = FontWeight.SemiBold
-                                    )
-                                }
-                                Text(
-                                    text = "${config.brightnessPercent} %",
-                                    color = NeonCyan,
-                                    fontWeight = FontWeight.Bold,
-                                    style = MaterialTheme.typography.titleSmall
-                                )
-                            }
-                            Slider(
-                                value = config.brightnessPercent.toFloat(),
-                                onValueChange = { viewModel.updateBrightness(it.toInt()) },
-                                valueRange = 10f..100f,
-                                steps = 17,
-                                colors = SliderDefaults.colors(thumbColor = NeonCyan, activeTrackColor = NeonCyan),
-                                modifier = Modifier.testTag("brightness_slider")
-                            )
-
-                            Spacer(modifier = Modifier.height(12.dp))
-
-                            Text(
-                                text = "Randstärke: ${config.borderThickness.toInt()} px",
-                                color = TextPrimary,
-                                style = MaterialTheme.typography.bodyMedium
-                            )
-                            Slider(
-                                value = config.borderThickness,
-                                onValueChange = { viewModel.updateGeometry(borderThickness = it) },
-                                valueRange = 4f..60f,
-                                colors = SliderDefaults.colors(thumbColor = NeonCyan, activeTrackColor = NeonCyan)
-                            )
-
-                            Text(
-                                text = "Animationsgeschwindigkeit: ${String.format("%.1f", config.animationSpeed)}x",
-                                color = TextPrimary,
-                                style = MaterialTheme.typography.bodyMedium
-                            )
-                            Slider(
-                                value = config.animationSpeed,
-                                onValueChange = { viewModel.updateGeometry(animationSpeed = it) },
-                                valueRange = 1f..20f,
-                                colors = SliderDefaults.colors(thumbColor = ElectricPurple, activeTrackColor = ElectricPurple)
-                            )
 
                             Text(
                                 text = "Eckenradius Oben: ${config.cornerRadiusTop.toInt()} px",
@@ -604,132 +1096,10 @@ fun EdgeDashboardScreen(
                         }
                     }
                 }
-
-                item {
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(20.dp),
-                        colors = CardDefaults.cardColors(containerColor = DarkSurface),
-                        border = CardDefaults.outlinedCardBorder()
-                    ) {
-                        Column(modifier = Modifier.padding(16.dp)) {
-                            Text(
-                                text = "Notch- & Kamera-Aussparungen",
-                                color = TextPrimary,
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold
-                            )
-
-                            Spacer(modifier = Modifier.height(12.dp))
-
-                            FlowRow(
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalArrangement = Arrangement.spacedBy(8.dp),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                NotchType.values().forEach { notch ->
-                                    val isSelected = config.notchConfig.notchType == notch
-                                    FilterChip(
-                                        selected = isSelected,
-                                        onClick = {
-                                            viewModel.updateNotchConfig(config.notchConfig.copy(notchType = notch))
-                                        },
-                                        label = { Text(notch.displayName) },
-                                        colors = FilterChipDefaults.filterChipColors(
-                                            selectedContainerColor = NeonMagenta.copy(alpha = 0.2f),
-                                            selectedLabelColor = NeonMagenta,
-                                            containerColor = DarkSurfaceVariant,
-                                            labelColor = TextSecondary
-                                        ),
-                                        border = FilterChipDefaults.filterChipBorder(
-                                            borderColor = if (isSelected) NeonMagenta else DarkBorder,
-                                            enabled = true,
-                                            selected = isSelected
-                                        )
-                                    )
-                                }
-                            }
-
-                            if (config.notchConfig.notchType != NotchType.NONE) {
-                                Spacer(modifier = Modifier.height(16.dp))
-
-                                Text(
-                                    text = "Notch-Breite: ${config.notchConfig.notchWidth.toInt()} px",
-                                    color = TextPrimary,
-                                    style = MaterialTheme.typography.bodyMedium
-                                )
-                                Slider(
-                                    value = config.notchConfig.notchWidth,
-                                    onValueChange = {
-                                        viewModel.updateNotchConfig(config.notchConfig.copy(notchWidth = it))
-                                    },
-                                    valueRange = 40f..400f,
-                                    colors = SliderDefaults.colors(thumbColor = NeonMagenta, activeTrackColor = NeonMagenta)
-                                )
-
-                                Text(
-                                    text = "Notch-Höhe: ${config.notchConfig.notchHeight.toInt()} px",
-                                    color = TextPrimary,
-                                    style = MaterialTheme.typography.bodyMedium
-                                )
-                                Slider(
-                                    value = config.notchConfig.notchHeight,
-                                    onValueChange = {
-                                        viewModel.updateNotchConfig(config.notchConfig.copy(notchHeight = it))
-                                    },
-                                    valueRange = 20f..250f,
-                                    colors = SliderDefaults.colors(thumbColor = NeonMagenta, activeTrackColor = NeonMagenta)
-                                )
-
-                                Text(
-                                    text = "Horizontaler Versatz X: ${config.notchConfig.notchOffsetX.toInt()} px",
-                                    color = TextPrimary,
-                                    style = MaterialTheme.typography.bodyMedium
-                                )
-                                Slider(
-                                    value = config.notchConfig.notchOffsetX,
-                                    onValueChange = {
-                                        viewModel.updateNotchConfig(config.notchConfig.copy(notchOffsetX = it))
-                                    },
-                                    valueRange = -150f..150f,
-                                    colors = SliderDefaults.colors(thumbColor = NeonCyan, activeTrackColor = NeonCyan)
-                                )
-
-                                Text(
-                                    text = "Vertikaler Versatz Y: ${config.notchConfig.notchOffsetY.toInt()} px",
-                                    color = TextPrimary,
-                                    style = MaterialTheme.typography.bodyMedium
-                                )
-                                Slider(
-                                    value = config.notchConfig.notchOffsetY,
-                                    onValueChange = {
-                                        viewModel.updateNotchConfig(config.notchConfig.copy(notchOffsetY = it))
-                                    },
-                                    valueRange = 0f..80f,
-                                    colors = SliderDefaults.colors(thumbColor = NeonCyan, activeTrackColor = NeonCyan)
-                                )
-
-                                Text(
-                                    text = "Kurven- / Lochradius: ${config.notchConfig.notchRadius.toInt()} px",
-                                    color = TextPrimary,
-                                    style = MaterialTheme.typography.bodyMedium
-                                )
-                                Slider(
-                                    value = config.notchConfig.notchRadius,
-                                    onValueChange = {
-                                        viewModel.updateNotchConfig(config.notchConfig.copy(notchRadius = it))
-                                    },
-                                    valueRange = 6f..60f,
-                                    colors = SliderDefaults.colors(thumbColor = NeonCyan, activeTrackColor = NeonCyan)
-                                )
-                            }
-                        }
-                    }
-                }
             }
 
-            // TAB 2: APPS & VIP-BENACHRICHTIGUNGEN
-            if (selectedTab == 2) {
+            // TAB 3: APPS & VIP-BENACHRICHTIGUNGEN
+            if (selectedTab == 3) {
                 if (!viewModel.isNotificationListenerEnabled()) {
                     item {
                         Card(
@@ -857,8 +1227,43 @@ fun EdgeDashboardScreen(
 
                             Spacer(modifier = Modifier.height(14.dp))
 
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "Bis gelesen weiterpulsieren",
+                                        color = TextPrimary,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    Text(
+                                        text = "Rand atmet, bis die Mitteilung weggewischt oder geöffnet wurde (max. 60 min)",
+                                        color = TextSecondary,
+                                        style = MaterialTheme.typography.bodySmall
+                                    )
+                                }
+                                Switch(
+                                    checked = notifSettings.pulseUntilDismissed,
+                                    onCheckedChange = {
+                                        viewModel.updateNotificationSettings(notifSettings.copy(pulseUntilDismissed = it))
+                                    },
+                                    colors = SwitchDefaults.colors(
+                                        checkedThumbColor = NeonCyan,
+                                        checkedTrackColor = DarkSurfaceVariant
+                                    ),
+                                    modifier = Modifier.testTag("until_dismissed_switch")
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(14.dp))
+
                             Text(
-                                text = "Standard-Leuchtdauer: ${notifSettings.defaultAlertDurationSeconds} Sekunden",
+                                text = if (notifSettings.pulseUntilDismissed)
+                                    "Leuchtdauer: bis gelesen (Regler gilt, wenn aus)"
+                                else
+                                    "Standard-Leuchtdauer: ${notifSettings.defaultAlertDurationSeconds} Sekunden",
                                 color = TextPrimary,
                                 style = MaterialTheme.typography.bodyMedium
                             )
@@ -874,50 +1279,73 @@ fun EdgeDashboardScreen(
                     }
                 }
 
+                // Blaues Pulsieren bei laufenden Vorgängen
                 item {
-                    Row(
+                    Card(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                        shape = RoundedCornerShape(20.dp),
+                        colors = CardDefaults.cardColors(containerColor = DarkSurface),
+                        border = CardDefaults.outlinedCardBorder()
                     ) {
-                        Text(
-                            text = "App-spezifische Profile (${appRules.size})",
-                            color = TextPrimary,
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold
-                        )
-
-                        Button(
-                            onClick = { showAddAppDialog = true },
-                            colors = ButtonDefaults.buttonColors(containerColor = DarkSurfaceVariant),
-                            border = ButtonDefaults.outlinedButtonBorder(enabled = true),
-                            shape = RoundedCornerShape(10.dp),
-                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
-                        ) {
-                            Icon(Icons.Default.Add, contentDescription = "Hinzufügen", tint = NeonCyan, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("App hinzufügen", color = NeonCyan, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "Blaues Pulsieren bei laufenden Vorgängen",
+                                        color = TextPrimary,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    Text(
+                                        text = "Der Rand atmet blau, solange eine App einen Fortschritt anzeigt – z. B. Download, Upload, Backup, Export oder Installation.",
+                                        color = TextSecondary,
+                                        style = MaterialTheme.typography.bodySmall
+                                    )
+                                }
+                                Switch(
+                                    checked = config.isProcessingPulseEnabled,
+                                    onCheckedChange = { viewModel.setProcessingPulseEnabled(it) },
+                                    colors = SwitchDefaults.colors(
+                                        checkedThumbColor = Color(0xFF1E6BFF),
+                                        checkedTrackColor = DarkSurfaceVariant
+                                    ),
+                                    modifier = Modifier.testTag("processing_pulse_switch")
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "Tempo folgt der Pulsgeschwindigkeit unter „3. Geometrie & Helligkeit“. Benötigt Benachrichtigungszugriff.",
+                                color = TextMuted,
+                                style = MaterialTheme.typography.labelSmall
+                            )
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Button(
+                                onClick = {
+                                    if (!Settings.canDrawOverlays(context)) {
+                                        overlayPermissionLauncher.launch(
+                                            Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${context.packageName}"))
+                                        )
+                                    } else {
+                                        viewModel.testProcessingPulse(8L)
+                                        Toast.makeText(context, "Verarbeitungs-Puls: 8 Sekunden Test", Toast.LENGTH_SHORT).show()
+                                    }
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E6BFF), contentColor = Color.White),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("processing_pulse_test")
+                            ) {
+                                Icon(Icons.Default.PlayArrow, contentDescription = null)
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Puls jetzt testen", fontWeight = FontWeight.Bold)
+                            }
                         }
                     }
                 }
 
-                items(appRules) { rule ->
-                    AppRuleCard(
-                        rule = rule,
-                        onUpdate = { viewModel.saveAppRule(it) },
-                        onDelete = { viewModel.removeAppRule(rule.packageName) },
-                        onTestAlert = {
-                            viewModel.triggerTestNotification(
-                                paletteId = rule.paletteId,
-                                useCustomColors = rule.useCustomColors,
-                                customColors = rule.customColors,
-                                shapeType = rule.shapeType,
-                                customEmoji = rule.customEmoji,
-                                durationSeconds = rule.durationSeconds
-                            )
-                        }
-                    )
-                }
 
                 item {
                     Spacer(modifier = Modifier.height(8.dp))
@@ -986,10 +1414,8 @@ fun EdgeDashboardScreen(
                                     paletteId = rule.paletteId,
                                     useCustomColors = rule.useCustomColors,
                                     customColors = rule.customColors,
-                                    shapeType = rule.shapeType,
-                                    customEmoji = rule.customEmoji,
-                                    durationSeconds = rule.durationSeconds,
-                                    centerHeart = rule.showCenterHeart
+                                    lineStyle = rule.lineStyle,
+                                    durationSeconds = rule.durationSeconds
                                 )
                             }
                         )
@@ -997,8 +1423,8 @@ fun EdgeDashboardScreen(
                 }
             }
 
-            // TAB 3: RUHEZEIT & AKKUSPARMODUS (ZEITPLAN / DND & BATTERY SAVER)
-            if (selectedTab == 3) {
+            // TAB 4: RUHEZEIT & AKKUSPARMODUS (ZEITPLAN / DND & BATTERY SAVER)
+            if (selectedTab == 4) {
                 // 1. Zeitplan & Ruhezeiten (Nicht stören / DND)
                 item {
                     val isInDndNow = scheduleConfig.isCurrentlyInDnd()
@@ -1451,27 +1877,6 @@ fun EdgeDashboardScreen(
                             )
                         }
                     }
-                    Spacer(modifier = Modifier.height(14.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            "Rotes Herz in der Mitte (Sperrbildschirm), Rand in App-Farbe",
-                            color = TextSecondary,
-                            fontSize = 12.sp,
-                            modifier = Modifier.weight(1f)
-                        )
-                        Switch(
-                            checked = newContactCenterHeart,
-                            onCheckedChange = { newContactCenterHeart = it },
-                            colors = SwitchDefaults.colors(
-                                checkedThumbColor = NeonMagenta,
-                                checkedTrackColor = DarkSurfaceVariant
-                            )
-                        )
-                    }
                 }
             },
             confirmButton = {
@@ -1483,13 +1888,11 @@ fun EdgeDashboardScreen(
                                     id = UUID.randomUUID().toString(),
                                     contactIdentifier = newContactName.trim(),
                                     paletteId = newContactPaletteId,
-                                    shapeType = BorderShapeType.HEART,
-                                    durationSeconds = 8,
-                                    showCenterHeart = newContactCenterHeart
+                                    lineStyle = LineStyle.RING,
+                                    durationSeconds = 8
                                 )
                             )
                             newContactName = ""
-                            newContactCenterHeart = false
                             showAddContactDialog = false
                         }
                     },

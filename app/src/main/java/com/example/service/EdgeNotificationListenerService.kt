@@ -7,6 +7,9 @@ import android.os.PowerManager
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import com.example.data.EdgePreferencesRepository
+import com.example.model.LightWhen
+import com.example.model.LineStyle
+import com.example.model.singleColor
 
 class EdgeNotificationListenerService : NotificationListenerService() {
 
@@ -17,12 +20,65 @@ class EdgeNotificationListenerService : NotificationListenerService() {
         repository = EdgePreferencesRepository.getInstance(applicationContext)
     }
 
+    override fun onListenerConnected() {
+        super.onListenerConnected()
+        refreshProcessingState()
+    }
+
+    override fun onNotificationRemoved(sbn: StatusBarNotification?) {
+        super.onNotificationRemoved(sbn)
+        refreshProcessingState()
+        // „Bis gelesen“: Licht endet, sobald keine leuchtende Benachrichtigung mehr offen ist
+        if (sbn != null && repository.removePendingAlertKey(sbn.key)) {
+            EdgeOverlayService.clearNotificationAlert(applicationContext)
+        }
+    }
+
+    /** Prüft „Wann leuchten“: Sperrmodus = Gerät gesperrt oder Bildschirm aus; aktiv = entsperrt und an. */
+    private fun isAllowedNow(lightWhen: LightWhen): Boolean {
+        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+        val keyguard = getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
+        val locked = keyguard.isKeyguardLocked || !powerManager.isInteractive
+        return when (lightWhen) {
+            LightWhen.BOTH -> true
+            LightWhen.LOCKED -> locked
+            LightWhen.SCREEN_ACTIVE -> !locked
+        }
+    }
+
+    /** Ein Vorgang läuft, sobald eine fremde App eine Benachrichtigung mit Fortschrittsanzeige zeigt. */
+    private fun isProcessingNotification(sbn: StatusBarNotification): Boolean {
+        if (sbn.packageName == packageName) return false
+        val extras = sbn.notification?.extras ?: return false
+        val indeterminate = extras.getBoolean(Notification.EXTRA_PROGRESS_INDETERMINATE, false)
+        val max = extras.getInt(Notification.EXTRA_PROGRESS_MAX, 0)
+        val progress = extras.getInt(Notification.EXTRA_PROGRESS, 0)
+        return indeterminate || (max > 0 && progress < max)
+    }
+
+    private fun refreshProcessingState() {
+        val active = try {
+            activeNotifications?.any { isProcessingNotification(it) } ?: false
+        } catch (_: Exception) {
+            false // Listener (noch) nicht verbunden
+        }
+        val wasActive = repository.runtimeState.value.processingActive
+        if (active == wasActive) return
+        repository.setProcessingActive(active)
+        if (active && repository.configFlow.value.isProcessingPulseEnabled) {
+            EdgeOverlayService.startOverlay(applicationContext)
+        }
+    }
+
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
         super.onNotificationPosted(sbn)
         if (sbn == null) return
 
         // Ignore our own ongoing service notification
         if (sbn.packageName == packageName) return
+
+        // Laufende Vorgänge (Fortschrittsbalken) für das blaue Pulsieren auswerten
+        refreshProcessingState()
 
         // Ignore ongoing foreground service notifications (music player, downloads, etc.)
         if (sbn.isOngoing) return
@@ -34,10 +90,7 @@ class EdgeNotificationListenerService : NotificationListenerService() {
         val isDnd = repository.scheduleConfigFlow.value.isCurrentlyInDnd()
         if (isDnd) return
 
-        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
-        if (notifSettings.onlyWhenScreenOff && powerManager.isInteractive) {
-            return
-        }
+        if (!isAllowedNow(notifSettings.lightWhen)) return
 
         val extras = sbn.notification?.extras
         val title = extras?.getString(Notification.EXTRA_TITLE)
@@ -45,13 +98,14 @@ class EdgeNotificationListenerService : NotificationListenerService() {
             ?: ""
         val text = extras?.getCharSequence(Notification.EXTRA_TEXT)?.toString() ?: ""
 
+        // „Bis gelesen“: Dauer 0 = bis zum Wegwischen; Schlüssel merken
+        val untilDismissed = notifSettings.pulseUntilDismissed
+        if (untilDismissed) repository.addPendingAlertKey(sbn.key)
+        fun duration(seconds: Int) = if (untilDismissed) EdgeOverlayService.DURATION_UNTIL_DISMISSED else seconds
+
         val contactRules = repository.contactRulesFlow.value
         val appRules = repository.appRulesFlow.value
-
-        // Gesperrter Bildschirm: Ring muss sichtbar sein, daher Display immer aufwecken
-        val keyguardManager = getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
-        val isLocked = keyguardManager.isKeyguardLocked
-        val wakeScreen = notifSettings.wakeScreenOnNotification || isLocked
+        val baseConfig = repository.configFlow.value
 
         // 1. Check for specific Contact match (in title or text)
         val matchedContact = contactRules.firstOrNull { rule ->
@@ -60,58 +114,50 @@ class EdgeNotificationListenerService : NotificationListenerService() {
                             text.contains(rule.contactIdentifier, ignoreCase = true))
         }
 
-        // 2. App-Regel der absendenden App (bestimmt Randfarbe und Muster)
-        val matchedApp = appRules.firstOrNull { rule ->
-            rule.packageName == sbn.packageName && rule.isEnabled
-        }
-
-        // Normaler VIP-Kontakt ohne Herz: eigene Farbe und eigenes Muster (unverändertes Verhalten)
-        if (matchedContact != null && !matchedContact.showCenterHeart) {
+        if (matchedContact != null) {
             EdgeOverlayService.triggerNotificationAlert(
                 context = applicationContext,
                 paletteId = matchedContact.paletteId,
                 useCustomColors = matchedContact.useCustomColors,
                 customColorsCsv = matchedContact.customColors.joinToString(","),
-                shapeType = matchedContact.shapeType.name,
-                customEmoji = matchedContact.customEmoji,
-                durationSeconds = matchedContact.durationSeconds,
-                wakeScreen = wakeScreen
+                lineStyle = matchedContact.lineStyle.name,
+                durationSeconds = duration(matchedContact.durationSeconds),
+                wakeScreen = notifSettings.wakeScreenOnNotification,
+                singleColor = matchedContact.singleColor()
             )
-            replaceNotificationOnLockScreen(sbn, isLocked)
             return
         }
 
-        // Herz-Kontakt (egal in welcher App): Rand bleibt in der App-Farbe,
-        // das rote Herz erscheint nur bei gesperrtem Bildschirm in der Displaymitte.
-        val showHeart = matchedContact != null && isLocked
+        // 2. Check for App-specific rule
+        val matchedApp = appRules.firstOrNull { rule ->
+            rule.packageName == sbn.packageName && rule.isEnabled
+        }
 
-        if (matchedApp != null || showHeart) {
-            val colorSource = matchedApp
+        if (matchedApp != null) {
             EdgeOverlayService.triggerNotificationAlert(
                 context = applicationContext,
-                paletteId = colorSource?.paletteId ?: matchedContact!!.paletteId,
-                useCustomColors = colorSource?.useCustomColors ?: matchedContact!!.useCustomColors,
-                customColorsCsv = (colorSource?.customColors ?: matchedContact!!.customColors).joinToString(","),
-                shapeType = colorSource?.shapeType?.name ?: matchedContact!!.shapeType.name,
-                customEmoji = colorSource?.customEmoji ?: matchedContact!!.customEmoji,
-                durationSeconds = colorSource?.durationSeconds ?: matchedContact!!.durationSeconds,
-                wakeScreen = wakeScreen,
-                centerHeart = showHeart,
-                showBorder = colorSource != null
+                paletteId = matchedApp.paletteId,
+                useCustomColors = matchedApp.useCustomColors,
+                customColorsCsv = matchedApp.customColors.joinToString(","),
+                lineStyle = matchedApp.lineStyle.name,
+                durationSeconds = duration(matchedApp.durationSeconds),
+                wakeScreen = notifSettings.wakeScreenOnNotification,
+                singleColor = matchedApp.singleColor()
             )
-            replaceNotificationOnLockScreen(sbn, isLocked)
+            return
         }
 
-        // Apps ohne eigene Regel sind nicht verknüpft: kein Licht, Benachrichtigung bleibt unangetastet.
-    }
-
-    // Auf dem Sperrbildschirm ersetzt das Licht die Benachrichtigung: Sie wird endgültig entfernt.
-    private fun replaceNotificationOnLockScreen(sbn: StatusBarNotification, isLocked: Boolean) {
-        if (!isLocked) return
-        try {
-            cancelNotification(sbn.key)
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
+        // 3. Fallback to default user edge configuration
+        EdgeOverlayService.triggerNotificationAlert(
+            context = applicationContext,
+            paletteId = baseConfig.selectedPaletteId,
+            useCustomColors = baseConfig.useCustomColors,
+            customColorsCsv = baseConfig.customColors.joinToString(","),
+            lineStyle = baseConfig.lineStyle.name,
+            durationSeconds = duration(notifSettings.defaultAlertDurationSeconds),
+            wakeScreen = notifSettings.wakeScreenOnNotification,
+            // Apps ohne eigene Farbe: Ring = Grundfarbe, Aura = Farbverlauf der Palette
+            singleColor = if (baseConfig.lineStyle == LineStyle.RING) baseConfig.ringColor else 0L
+        )
     }
 }

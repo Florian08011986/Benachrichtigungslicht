@@ -7,15 +7,21 @@ import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.example.model.AnimationMode
 import com.example.model.AppEdgeRule
 import com.example.model.BatterySaverConfig
-import com.example.model.BorderShapeType
 import com.example.model.ContactEdgeRule
 import com.example.model.DefaultAppRules
 import com.example.model.EdgeConfig
 import com.example.model.EdgeScheduleConfig
+import com.example.model.LightProfile
+import com.example.model.LightWhen
+import com.example.model.LineStyle
+import com.example.model.PulseCurve
+import com.example.model.RING_THICKNESS_PX
 import com.example.model.NotchConfig
 import com.example.model.NotchType
 import com.example.model.NotificationEdgeSettings
@@ -34,6 +40,14 @@ import java.util.UUID
 
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "edge_lighting_preferences")
 
+/** Flüchtiger Overlay-Status: Live-Vorschau (App im Vordergrund) und laufende Vorgänge. */
+data class OverlayRuntimeState(
+    val previewActive: Boolean = false,
+    val processingActive: Boolean = false,
+    val processingTestActive: Boolean = false,
+    val introNonce: Long = 0L // jede Erhöhung spielt den Zwei-Stufen-Start einmal ab
+)
+
 class EdgePreferencesRepository private constructor(context: Context) {
 
     private val applicationContext = context.applicationContext
@@ -47,16 +61,58 @@ class EdgePreferencesRepository private constructor(context: Context) {
         _callerAlertActive.value = active
     }
 
+    // Flüchtiger Laufzeitstatus (nicht persistiert): Live-Vorschau & Verarbeitungs-Puls
+    private val _runtimeState = MutableStateFlow(OverlayRuntimeState())
+    val runtimeState: StateFlow<OverlayRuntimeState> = _runtimeState.asStateFlow()
+
+    fun setPreviewActive(active: Boolean) {
+        _runtimeState.value = _runtimeState.value.copy(previewActive = active)
+    }
+
+    fun setProcessingActive(active: Boolean) {
+        _runtimeState.value = _runtimeState.value.copy(processingActive = active)
+    }
+
+    fun setProcessingTestActive(active: Boolean) {
+        _runtimeState.value = _runtimeState.value.copy(processingTestActive = active)
+    }
+
+    fun requestIntroReplay() {
+        _runtimeState.value = _runtimeState.value.copy(introNonce = _runtimeState.value.introNonce + 1)
+    }
+
+    // Benachrichtigungen, deren Licht bis zum Wegwischen läuft (Schlüssel = StatusBarNotification.key)
+    private val pendingAlertKeys = mutableSetOf<String>()
+
+    @Synchronized
+    fun addPendingAlertKey(key: String) {
+        pendingAlertKeys.add(key)
+    }
+
+    /** Entfernt den Schlüssel; liefert true, wenn danach keine offene Benachrichtigung mehr leuchten soll. */
+    @Synchronized
+    fun removePendingAlertKey(key: String): Boolean {
+        val removed = pendingAlertKeys.remove(key)
+        return removed && pendingAlertKeys.isEmpty()
+    }
+
+    @Synchronized
+    fun clearPendingAlertKeys() {
+        pendingAlertKeys.clear()
+    }
+
     object Keys {
         val OVERLAY_ENABLED = booleanPreferencesKey("overlay_enabled")
         val CALLER_ID_ENABLED = booleanPreferencesKey("caller_id_enabled")
         val PALETTE_ID = intPreferencesKey("palette_id")
         val USE_CUSTOM_COLORS = booleanPreferencesKey("use_custom_colors")
         val CUSTOM_COLORS_CSV = stringPreferencesKey("custom_colors_csv")
-        val SHAPE_TYPE = stringPreferencesKey("shape_type")
-        val CUSTOM_EMOJI = stringPreferencesKey("custom_emoji")
-        val SHAPE_SIZE = floatPreferencesKey("shape_size")
-        val SHAPE_SPACING = floatPreferencesKey("shape_spacing")
+        val LINE_STYLE = stringPreferencesKey("line_style")
+        val RING_COLOR = longPreferencesKey("ring_color")
+        val CALL_COLOR = longPreferencesKey("call_color")
+        val GLOW_REACH = floatPreferencesKey("glow_reach")
+        val PULSE_CURVE = stringPreferencesKey("pulse_curve")
+        val PULSE_STRENGTH = floatPreferencesKey("pulse_strength")
         val BORDER_THICKNESS = floatPreferencesKey("border_thickness")
         val ANIMATION_SPEED = floatPreferencesKey("animation_speed")
         val CORNER_RADIUS_TOP = floatPreferencesKey("corner_radius_top")
@@ -68,16 +124,22 @@ class EdgePreferencesRepository private constructor(context: Context) {
         val NOTCH_OFFSET_Y = floatPreferencesKey("notch_offset_y")
         val NOTCH_RADIUS = floatPreferencesKey("notch_radius")
         val GLOW_ENABLED = booleanPreferencesKey("glow_enabled")
-        val BRIGHTNESS_PERCENT = intPreferencesKey("brightness_percent")
+        val OPACITY_PERCENT = intPreferencesKey("brightness_percent") // Schlüssel beibehalten: bisheriger Wert wird übernommen
+        val ANIMATION_MODE = stringPreferencesKey("animation_mode")
+        val PULSE_SPEED = floatPreferencesKey("pulse_speed")
+        val LIVE_PREVIEW_ENABLED = booleanPreferencesKey("live_preview_enabled")
+        val PROCESSING_PULSE_ENABLED = booleanPreferencesKey("processing_pulse_enabled")
+        val TWO_STAGE_START = booleanPreferencesKey("two_stage_start")
 
         // Notification Edge Light Keys
         val NOTIF_ALERT_ENABLED = booleanPreferencesKey("notif_alert_enabled")
         val NOTIF_WAKE_SCREEN = booleanPreferencesKey("notif_wake_screen")
         val NOTIF_DURATION = intPreferencesKey("notif_duration")
         val NOTIF_ONLY_SCREEN_OFF = booleanPreferencesKey("notif_only_screen_off")
+        val NOTIF_UNTIL_DISMISSED = booleanPreferencesKey("notif_until_dismissed")
+        val NOTIF_LIGHT_WHEN = stringPreferencesKey("notif_light_when")
         val APP_RULES_RAW = stringPreferencesKey("app_rules_raw")
         val CONTACT_RULES_RAW = stringPreferencesKey("contact_rules_raw")
-        val APP_RULES_MIGRATED_V2 = booleanPreferencesKey("app_rules_migrated_v2")
 
         // Schedule / DND Keys
         val SCHEDULE_ENABLED = booleanPreferencesKey("schedule_enabled")
@@ -103,11 +165,7 @@ class EdgePreferencesRepository private constructor(context: Context) {
                 ?.takeIf { it.isNotEmpty() }
                 ?: listOf(0xFF00E5FFL, 0xFFD500F9L, 0xFFFF1744L)
 
-            val shapeType = try {
-                BorderShapeType.valueOf(prefs[Keys.SHAPE_TYPE] ?: BorderShapeType.CONTINUOUS_LINE.name)
-            } catch (_: Exception) {
-                BorderShapeType.CONTINUOUS_LINE
-            }
+            val lineStyle = parseEnum(prefs[Keys.LINE_STYLE], LineStyle.RING)
 
             val notchType = try {
                 NotchType.valueOf(prefs[Keys.NOTCH_TYPE] ?: NotchType.NONE.name)
@@ -127,19 +185,30 @@ class EdgePreferencesRepository private constructor(context: Context) {
             EdgeConfig(
                 isOverlayEnabled = prefs[Keys.OVERLAY_ENABLED] ?: false,
                 isCallerIdAlertEnabled = prefs[Keys.CALLER_ID_ENABLED] ?: false,
-                brightnessPercent = prefs[Keys.BRIGHTNESS_PERCENT] ?: 100,
+                opacityPercent = prefs[Keys.OPACITY_PERCENT] ?: 100,
                 selectedPaletteId = prefs[Keys.PALETTE_ID] ?: 0,
                 useCustomColors = prefs[Keys.USE_CUSTOM_COLORS] ?: false,
                 customColors = customColorsList,
-                shapeType = shapeType,
-                customEmoji = prefs[Keys.CUSTOM_EMOJI] ?: "✨",
-                shapeSize = prefs[Keys.SHAPE_SIZE] ?: 36f,
-                shapeSpacing = prefs[Keys.SHAPE_SPACING] ?: 42f,
-                borderThickness = prefs[Keys.BORDER_THICKNESS] ?: 18f,
+                lineStyle = lineStyle,
+                ringColor = prefs[Keys.RING_COLOR] ?: 0xFF00FFFFL,
+                callColor = prefs[Keys.CALL_COLOR] ?: 0xFF0088FFL,
+                glowReach = prefs[Keys.GLOW_REACH] ?: 120f,
+                borderThickness = RING_THICKNESS_PX, // fest, nicht änderbar
                 animationSpeed = prefs[Keys.ANIMATION_SPEED] ?: 5f,
+                animationMode = try {
+                    AnimationMode.valueOf(prefs[Keys.ANIMATION_MODE] ?: AnimationMode.ROTATE.name)
+                } catch (_: Exception) {
+                    AnimationMode.ROTATE
+                },
+                pulseSpeed = prefs[Keys.PULSE_SPEED] ?: 0.5f,
+                pulseCurve = parseEnum(prefs[Keys.PULSE_CURVE], PulseCurve.SINE),
+                pulseStrength = prefs[Keys.PULSE_STRENGTH] ?: 0.6f,
+                isLivePreviewEnabled = prefs[Keys.LIVE_PREVIEW_ENABLED] ?: true,
+                isProcessingPulseEnabled = prefs[Keys.PROCESSING_PULSE_ENABLED] ?: false,
+                isTwoStageStartEnabled = prefs[Keys.TWO_STAGE_START] ?: false,
                 cornerRadiusTop = prefs[Keys.CORNER_RADIUS_TOP] ?: 70f,
                 cornerRadiusBottom = prefs[Keys.CORNER_RADIUS_BOTTOM] ?: 70f,
-                notchConfig = notchConfig,
+                notchConfig = NotchConfig(), // Kamera-Loch/Notch entfernt: immer gerader Rand
                 isGlowEnabled = prefs[Keys.GLOW_ENABLED] ?: true,
                 isCallerAlertActive = _callerAlertActive.value
             )
@@ -155,7 +224,13 @@ class EdgePreferencesRepository private constructor(context: Context) {
                 isNotificationAlertEnabled = prefs[Keys.NOTIF_ALERT_ENABLED] ?: true,
                 wakeScreenOnNotification = prefs[Keys.NOTIF_WAKE_SCREEN] ?: true,
                 defaultAlertDurationSeconds = prefs[Keys.NOTIF_DURATION] ?: 6,
-                onlyWhenScreenOff = prefs[Keys.NOTIF_ONLY_SCREEN_OFF] ?: false
+                onlyWhenScreenOff = prefs[Keys.NOTIF_ONLY_SCREEN_OFF] ?: false,
+                // Übernahme der alten Option „nur bei ausgeschaltetem Bildschirm“ → Sperrmodus
+                lightWhen = parseEnum(
+                    prefs[Keys.NOTIF_LIGHT_WHEN],
+                    if (prefs[Keys.NOTIF_ONLY_SCREEN_OFF] == true) LightWhen.LOCKED else LightWhen.BOTH
+                ),
+                pulseUntilDismissed = prefs[Keys.NOTIF_UNTIL_DISMISSED] ?: false
             )
         }.stateIn(
             scope = scope,
@@ -237,30 +312,6 @@ class EdgePreferencesRepository private constructor(context: Context) {
             initialValue = BatterySaverConfig()
         )
 
-    init {
-        migrateAppRulesToAllowedApps()
-    }
-
-    // Einmalig: gespeicherte App-Regeln auf die erlaubten Apps beschränken. Farben der behaltenen Regeln bleiben unverändert.
-    private fun migrateAppRulesToAllowedApps() {
-        scope.launch {
-            applicationContext.dataStore.edit { prefs ->
-                if (prefs[Keys.APP_RULES_MIGRATED_V2] == true) return@edit
-                val raw = prefs[Keys.APP_RULES_RAW]
-                val current = if (raw.isNullOrBlank()) {
-                    DefaultAppRules.getDefaultRules()
-                } else {
-                    deserializeAppRules(raw)
-                }
-                val kept = current.filter { it.packageName in DefaultAppRules.ALLOWED_PACKAGES }
-                prefs[Keys.APP_RULES_RAW] = serializeAppRules(
-                    if (kept.isEmpty()) DefaultAppRules.getDefaultRules() else kept
-                )
-                prefs[Keys.APP_RULES_MIGRATED_V2] = true
-            }
-        }
-    }
-
     fun updateOverlayEnabled(enabled: Boolean) {
         scope.launch {
             applicationContext.dataStore.edit { it[Keys.OVERLAY_ENABLED] = enabled }
@@ -273,10 +324,10 @@ class EdgePreferencesRepository private constructor(context: Context) {
         }
     }
 
-    fun updateBrightness(percent: Int) {
+    fun updateOpacity(percent: Int) {
         val clamped = percent.coerceIn(10, 100)
         scope.launch {
-            applicationContext.dataStore.edit { it[Keys.BRIGHTNESS_PERCENT] = clamped }
+            applicationContext.dataStore.edit { it[Keys.OPACITY_PERCENT] = clamped }
         }
     }
 
@@ -298,22 +349,14 @@ class EdgePreferencesRepository private constructor(context: Context) {
         }
     }
 
-    fun updateShapeType(shape: BorderShapeType, customEmoji: String? = null) {
+    fun updateLineStyle(
+        lineStyle: LineStyle? = null,
+        glowReach: Float? = null
+    ) {
         scope.launch {
-            applicationContext.dataStore.edit {
-                it[Keys.SHAPE_TYPE] = shape.name
-                if (customEmoji != null) {
-                    it[Keys.CUSTOM_EMOJI] = customEmoji
-                }
-            }
-        }
-    }
-
-    fun updateShapeParameters(size: Float, spacing: Float) {
-        scope.launch {
-            applicationContext.dataStore.edit {
-                it[Keys.SHAPE_SIZE] = size
-                it[Keys.SHAPE_SPACING] = spacing
+            applicationContext.dataStore.edit { prefs ->
+                lineStyle?.let { prefs[Keys.LINE_STYLE] = it.name }
+                glowReach?.let { prefs[Keys.GLOW_REACH] = it }
             }
         }
     }
@@ -333,6 +376,67 @@ class EdgePreferencesRepository private constructor(context: Context) {
                 cornerRadiusBottom?.let { prefs[Keys.CORNER_RADIUS_BOTTOM] = it }
                 glowEnabled?.let { prefs[Keys.GLOW_ENABLED] = it }
             }
+        }
+    }
+
+    fun updateMotion(
+        animationMode: AnimationMode? = null,
+        pulseSpeed: Float? = null,
+        pulseCurve: PulseCurve? = null,
+        pulseStrength: Float? = null
+    ) {
+        scope.launch {
+            applicationContext.dataStore.edit { prefs ->
+                animationMode?.let { prefs[Keys.ANIMATION_MODE] = it.name }
+                pulseSpeed?.let { prefs[Keys.PULSE_SPEED] = it }
+                pulseCurve?.let { prefs[Keys.PULSE_CURVE] = it.name }
+                pulseStrength?.let { prefs[Keys.PULSE_STRENGTH] = it }
+            }
+        }
+    }
+
+    /** Setzt Stil, Farbe, Bewegung und Rand eines Komplettprofils in einem Schreibvorgang. */
+    fun applyLightProfile(profile: LightProfile) {
+        scope.launch {
+            applicationContext.dataStore.edit { prefs ->
+                prefs[Keys.PALETTE_ID] = profile.paletteId
+                prefs[Keys.USE_CUSTOM_COLORS] = false
+                prefs[Keys.LINE_STYLE] = profile.lineStyle.name
+                prefs[Keys.ANIMATION_MODE] = profile.animationMode.name
+                prefs[Keys.ANIMATION_SPEED] = profile.animationSpeed
+                prefs[Keys.PULSE_SPEED] = profile.pulseSpeed
+                prefs[Keys.PULSE_CURVE] = profile.pulseCurve.name
+                prefs[Keys.PULSE_STRENGTH] = profile.pulseStrength
+                prefs[Keys.GLOW_REACH] = profile.glowReach
+                prefs[Keys.BORDER_THICKNESS] = profile.borderThickness
+                prefs[Keys.GLOW_ENABLED] = profile.glowEnabled
+            }
+        }
+    }
+
+    fun updateLivePreviewEnabled(enabled: Boolean) {
+        scope.launch {
+            applicationContext.dataStore.edit { it[Keys.LIVE_PREVIEW_ENABLED] = enabled }
+        }
+    }
+
+    fun updateRingColor(color: Long) {
+        scope.launch { applicationContext.dataStore.edit { it[Keys.RING_COLOR] = color } }
+    }
+
+    fun updateCallColor(color: Long) {
+        scope.launch { applicationContext.dataStore.edit { it[Keys.CALL_COLOR] = color } }
+    }
+
+    fun updateTwoStageStartEnabled(enabled: Boolean) {
+        scope.launch {
+            applicationContext.dataStore.edit { it[Keys.TWO_STAGE_START] = enabled }
+        }
+    }
+
+    fun updateProcessingPulseEnabled(enabled: Boolean) {
+        scope.launch {
+            applicationContext.dataStore.edit { it[Keys.PROCESSING_PULSE_ENABLED] = enabled }
         }
     }
 
@@ -356,6 +460,8 @@ class EdgePreferencesRepository private constructor(context: Context) {
                 prefs[Keys.NOTIF_WAKE_SCREEN] = settings.wakeScreenOnNotification
                 prefs[Keys.NOTIF_DURATION] = settings.defaultAlertDurationSeconds
                 prefs[Keys.NOTIF_ONLY_SCREEN_OFF] = settings.onlyWhenScreenOff
+                prefs[Keys.NOTIF_LIGHT_WHEN] = settings.lightWhen.name
+                prefs[Keys.NOTIF_UNTIL_DISMISSED] = settings.pulseUntilDismissed
             }
         }
     }
@@ -442,8 +548,8 @@ class EdgePreferencesRepository private constructor(context: Context) {
                 r.paletteId,
                 r.useCustomColors,
                 r.customColors.joinToString(";"),
-                r.shapeType.name,
-                r.customEmoji.ifEmpty { " " },
+                r.lineStyle.name,
+                " ", // reserviert (früher Emoji) – hält das 9-Felder-Format kompatibel
                 r.durationSeconds
             ).joinToString("|||")
         }
@@ -455,7 +561,7 @@ class EdgePreferencesRepository private constructor(context: Context) {
             if (p.size >= 9) {
                 val customCol = p[5].split(";")
                     .mapNotNull { it.trim().toLongOrNull() }
-                val shape = try { BorderShapeType.valueOf(p[6]) } catch (_: Exception) { BorderShapeType.CONTINUOUS_LINE }
+                val style = parseEnum(p[6], LineStyle.RING)
                 AppEdgeRule(
                     packageName = p[0],
                     appName = p[1],
@@ -463,8 +569,7 @@ class EdgePreferencesRepository private constructor(context: Context) {
                     paletteId = p[3].toIntOrNull() ?: 0,
                     useCustomColors = p[4].toBooleanStrictOrNull() ?: false,
                     customColors = customCol,
-                    shapeType = shape,
-                    customEmoji = p[7].trim(),
+                    lineStyle = style,
                     durationSeconds = p[8].toIntOrNull() ?: 6
                 )
             } else null
@@ -480,10 +585,9 @@ class EdgePreferencesRepository private constructor(context: Context) {
                 r.paletteId,
                 r.useCustomColors,
                 r.customColors.joinToString(";"),
-                r.shapeType.name,
-                r.customEmoji.ifEmpty { " " },
-                r.durationSeconds,
-                r.showCenterHeart
+                r.lineStyle.name,
+                " ", // reserviert (früher Emoji) – hält das 9-Felder-Format kompatibel
+                r.durationSeconds
             ).joinToString("|||")
         }
     }
@@ -494,7 +598,7 @@ class EdgePreferencesRepository private constructor(context: Context) {
             if (p.size >= 9) {
                 val customCol = p[5].split(";")
                     .mapNotNull { it.trim().toLongOrNull() }
-                val shape = try { BorderShapeType.valueOf(p[6]) } catch (_: Exception) { BorderShapeType.HEART }
+                val style = parseEnum(p[6], LineStyle.RING)
                 ContactEdgeRule(
                     id = p[0].ifBlank { UUID.randomUUID().toString() },
                     contactIdentifier = p[1],
@@ -502,14 +606,16 @@ class EdgePreferencesRepository private constructor(context: Context) {
                     paletteId = p[3].toIntOrNull() ?: 41,
                     useCustomColors = p[4].toBooleanStrictOrNull() ?: false,
                     customColors = customCol,
-                    shapeType = shape,
-                    customEmoji = p[7].trim(),
-                    durationSeconds = p[8].toIntOrNull() ?: 8,
-                    showCenterHeart = p.getOrNull(9)?.trim()?.toBooleanStrictOrNull() ?: false
+                    lineStyle = style,
+                    durationSeconds = p[8].toIntOrNull() ?: 8
                 )
             } else null
         }
     }
+
+    /** Liest einen Enum-Namen tolerant; unbekannte/alte Werte (z. B. frühere Figuren) fallen auf [default] zurück. */
+    private inline fun <reified T : Enum<T>> parseEnum(name: String?, default: T): T =
+        if (name == null) default else enumValues<T>().firstOrNull { it.name == name } ?: default
 
     companion object {
         @Volatile

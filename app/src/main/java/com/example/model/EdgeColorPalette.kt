@@ -66,7 +66,11 @@ object EdgeColorPalette {
         ColorPreset(44, "Hyper Orange", "Vibrant", listOf(0xFFFF5722L, 0xFFFF9800L, 0xFFFFC107L)),
         ColorPreset(45, "Glitch Cyan Magenta", "Vibrant", listOf(0xFF00FFFFL, 0xFF000000L, 0xFFFF00FFL)),
         ColorPreset(46, "Golden Dragon", "Vibrant", listOf(0xFFFFD700L, 0xFFFF4500L, 0xFFB22222L)),
-        ColorPreset(47, "Quantum Plasma", "Vibrant", listOf(0xFF7928CAL, 0xFFFF0080L, 0xFF0070F3L))
+        ColorPreset(47, "Quantum Plasma", "Vibrant", listOf(0xFF7928CAL, 0xFFFF0080L, 0xFF0070F3L)),
+
+        // KI-Assistent (49 - 50)
+        ColorPreset(48, "KI-Atem Blau", "KI", listOf(0xFF2F6BFFL, 0xFF5AB0FFL, 0xFF9B7BFFL, 0xFF3D8BFFL)),
+        ColorPreset(49, "Agenten-Glow", "KI", listOf(0xFF00B3C7L, 0xFF2EE6D6L, 0xFF1A4DFFL))
     )
 
     fun getPreset(id: Int): ColorPreset {

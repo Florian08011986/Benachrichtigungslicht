@@ -47,7 +47,9 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.model.BorderShapeType
+import com.example.model.LineStyle
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import com.example.model.ContactEdgeRule
 import com.example.model.EdgeColorPalette
 import com.example.ui.theme.DarkBorder
@@ -59,6 +61,7 @@ import com.example.ui.theme.NeonMagenta
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ContactRuleCard(
     rule: ContactEdgeRule,
@@ -229,68 +232,32 @@ fun ContactRuleCard(
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-                // Border Shape Selection (Hearts, Stars, Diamonds, Line)
+                // Linienstil-Auswahl
                 Text(
-                    text = "Kontakt-Muster: ${rule.shapeType.displayName}",
+                    text = "Linienstil: ${rule.lineStyle.displayName}",
                     color = TextSecondary,
                     style = MaterialTheme.typography.labelMedium
                 )
                 Spacer(modifier = Modifier.height(6.dp))
-                Row(
+                FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    listOf(
-                        BorderShapeType.HEART,
-                        BorderShapeType.CONTINUOUS_LINE,
-                        BorderShapeType.STAR,
-                        BorderShapeType.DIAMOND
-                    ).forEach { shape ->
-                        val isSelected = rule.shapeType == shape
+                    LineStyle.entries.forEach { style ->
+                        val isSelected = rule.lineStyle == style
                         Box(
                             modifier = Modifier
-                                .weight(1f)
                                 .clip(RoundedCornerShape(8.dp))
                                 .background(if (isSelected) DarkSurfaceVariant else DarkBorder)
                                 .border(1.dp, if (isSelected) NeonMagenta else Color.Transparent, RoundedCornerShape(8.dp))
-                                .clickable { onUpdate(rule.copy(shapeType = shape)) }
-                                .padding(vertical = 6.dp),
+                                .clickable { onUpdate(rule.copy(lineStyle = style)) }
+                                .padding(horizontal = 10.dp, vertical = 6.dp),
                             contentAlignment = Alignment.Center
                         ) {
-                            Text(shape.iconLabel, fontSize = 16.sp)
+                            Text(style.displayName, fontSize = 12.sp, color = if (isSelected) NeonMagenta else TextSecondary)
                         }
                     }
-                }
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                // Rotes Herz in der Mitte (Sperrbildschirm)
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "Rotes Herz in der Mitte (Sperrbildschirm)",
-                            color = TextPrimary,
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Text(
-                            text = "Rand behält die Farbe der App, in der der Kontakt schreibt",
-                            color = TextSecondary,
-                            style = MaterialTheme.typography.labelSmall
-                        )
-                    }
-                    Switch(
-                        checked = rule.showCenterHeart,
-                        onCheckedChange = { onUpdate(rule.copy(showCenterHeart = it)) },
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = NeonMagenta,
-                            checkedTrackColor = DarkSurfaceVariant
-                        )
-                    )
                 }
 
                 Spacer(modifier = Modifier.height(12.dp))

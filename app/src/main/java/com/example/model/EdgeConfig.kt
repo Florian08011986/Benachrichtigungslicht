@@ -1,15 +1,37 @@
 package com.example.model
 
-enum class BorderShapeType(val displayName: String, val iconLabel: String) {
-    CONTINUOUS_LINE("Dauerhafter Leuchtstreifen", "━"),
-    HEART("Herzen", "💖"),
-    STAR("Sterne", "⭐"),
-    DIAMOND("Diamanten", "💎"),
-    SUN("Sonnen", "🌞"),
-    EMOJI_COOL("Coole Brille", "😎"),
-    EMOJI_SLEEP("Schlaf-Zzz", "💤"),
-    CUSTOM_EMOJI("Eigenes Emoji", "✨")
+/** Visualisierung entlang des Bildschirmrands – ausschließlich linienförmig. */
+enum class LineStyle(val displayName: String, val description: String) {
+    RING("Ring", "Ruhiger, durchgehender Rahmen in einer Farbe"),
+    AURA("KI-Aura", "Keine Kontur – Licht zieht weich ins Display")
 }
+
+/** Wann eine Benachrichtigung den Rand aufleuchten lässt. */
+enum class LightWhen(val displayName: String) {
+    SCREEN_ACTIVE("Bei aktivem Display"),
+    LOCKED("Im Sperrmodus"),
+    BOTH("Beides")
+}
+
+/** Feste Ringbreite in px – nicht manuell änderbar. */
+const val RING_THICKNESS_PX: Float = 25f
+
+/** Auswahl-Farbfelder für Ring-, App- und Anruf-Farben – voll gesättigt für maximale Leuchtkraft. */
+val COLOR_SWATCHES: List<Long> = listOf(
+    0xFF00FF00L, // Grün
+    0xFF00FF88L, // Mint
+    0xFF00FFFFL, // Cyan
+    0xFF0088FFL, // Blau
+    0xFF0000FFL, // Königsblau
+    0xFF8800FFL, // Violett
+    0xFFFF00FFL, // Magenta
+    0xFFFF0088L, // Pink
+    0xFFFF0000L, // Rot
+    0xFFFF4400L, // Orange-Rot
+    0xFFFF8800L, // Orange
+    0xFFFFEE00L, // Gelb
+    0xFFFFFFFFL  // Weiß
+)
 
 enum class NotchType(val displayName: String) {
     NONE("Keine (Gerader Rand)"),
@@ -19,6 +41,75 @@ enum class NotchType(val displayName: String) {
     PUNCH_HOLE_LEFT("Kamera-Loch Links"),
     PILL_ISLAND("Pille / Dynamische Insel")
 }
+
+enum class AnimationMode(val displayName: String) {
+    ROTATE("Bewegen"),
+    PULSE("Pulsieren"),
+    ROTATE_AND_PULSE("Bewegen + Pulsieren")
+}
+
+/** Verlaufskurve eines Pulses (Eingang: Phase 0..1, Ausgang: Pegel 0..1). */
+enum class PulseCurve(val displayName: String, val description: String) {
+    SINE("Sanft", "Gleichmäßige Sinuswelle"),
+    BREATH("Atmen", "Ein- und Ausatmen mit kurzer Ruhe oben und unten"),
+    GLIMMER("Glimmen", "Ganz leichtes, ruhiges Auf und Ab")
+}
+
+/** Komplettprofil: Stil + Farbe + Bewegung + Rand in einem Tipp. */
+data class LightProfile(
+    val id: String,
+    val name: String,
+    val description: String,
+    val paletteId: Int,
+    val lineStyle: LineStyle,
+    val animationMode: AnimationMode,
+    val animationSpeed: Float,
+    val pulseSpeed: Float,
+    val pulseCurve: PulseCurve,
+    val pulseStrength: Float,
+    val borderThickness: Float,
+    val glowReach: Float,
+    val glowEnabled: Boolean = true
+)
+
+object LightProfiles {
+    val ALL: List<LightProfile> = listOf(
+        LightProfile(
+            id = "ki_atem_blau",
+            name = "KI-Atem Blau",
+            description = "Blau-violette Aura zieht weich ins Display, Farben wandern langsam, atmet ca. alle 2,5 s",
+            paletteId = 48,
+            lineStyle = LineStyle.AURA,
+            animationMode = AnimationMode.ROTATE_AND_PULSE,
+            animationSpeed = 0.9f,
+            pulseSpeed = 0.4f,
+            pulseCurve = PulseCurve.BREATH,
+            pulseStrength = 0.55f,
+            borderThickness = 10f,
+            glowReach = 160f
+        ),
+        LightProfile(
+            id = "agenten_glow",
+            name = "Agenten-Glow",
+            description = "Türkis-blauer, randloser Schein, steht still und atmet ruhig ca. alle 3 s",
+            paletteId = 49,
+            lineStyle = LineStyle.AURA,
+            animationMode = AnimationMode.PULSE,
+            animationSpeed = 1f,
+            pulseSpeed = 0.33f,
+            pulseCurve = PulseCurve.BREATH,
+            pulseStrength = 0.45f,
+            borderThickness = 8f,
+            glowReach = 110f
+        )
+    )
+}
+
+/** Eigenes, neutrales Spektrum für die erste Stufe des Zwei-Stufen-Starts. */
+val TWO_STAGE_INTRO_COLORS: List<Long> = listOf(0xFFFF5A6EL, 0xFFFFC23DL, 0xFF35D49AL, 0xFF4C8DFFL)
+
+/** Feste Blau-Palette für das „Verarbeitung läuft“-Pulsieren. */
+val PROCESSING_PULSE_COLORS: List<Long> = listOf(0xFF1E6BFFL, 0xFF00C2FFL, 0xFF6A5CFFL)
 
 data class NotchConfig(
     val notchType: NotchType = NotchType.NONE,
@@ -32,21 +123,27 @@ data class NotchConfig(
 data class EdgeConfig(
     val isOverlayEnabled: Boolean = false,
     val isCallerIdAlertEnabled: Boolean = false,
-    val brightnessPercent: Int = 100,   // 10..100%
+    val opacityPercent: Int = 100,      // 10..100 % Deckkraft (100 = verdeckt Inhalt vollständig)
     val selectedPaletteId: Int = 0,
     val useCustomColors: Boolean = false,
     val customColors: List<Long> = listOf(0xFF00E5FFL, 0xFFD500F9L, 0xFFFF1744L),
-    val shapeType: BorderShapeType = BorderShapeType.CONTINUOUS_LINE,
-    val customEmoji: String = "⚡",
-    val shapeSize: Float = 36f,         // px
-    val shapeSpacing: Float = 42f,      // px between shapes
-    val borderThickness: Float = 18f,   // px
-    val animationSpeed: Float = 5f,     // 1f..20f
+    val lineStyle: LineStyle = LineStyle.RING,
+    val ringColor: Long = 0xFF00FFFFL,  // Grundfarbe des Rings (Apps ohne eigene Farbe)
+    val callColor: Long = 0xFF0088FFL,  // Farbe bei eingehenden Anrufen
+    val glowReach: Float = 120f,        // px, wie weit Glow/Aura ins Display reicht
+    val borderThickness: Float = RING_THICKNESS_PX, // px, fest
+    val animationSpeed: Float = 5f,     // 0.2f..20f (Bewegungstempo, 1x = 36°/s)
+    val animationMode: AnimationMode = AnimationMode.ROTATE,
+    val pulseSpeed: Float = 0.5f,       // Pulse pro Sekunde, 0.125f..2f
+    val pulseCurve: PulseCurve = PulseCurve.SINE,
+    val pulseStrength: Float = 0.6f,    // 0.1..1.0, Anteil der Helligkeit, der beim Puls abtaucht
+    val isLivePreviewEnabled: Boolean = true,
+    val isProcessingPulseEnabled: Boolean = false,
+    val isTwoStageStartEnabled: Boolean = false, // beim Auslösen kurz Mehrfarb-Spektrum, dann Zielfarben
     val cornerRadiusTop: Float = 70f,   // px
     val cornerRadiusBottom: Float = 70f,// px
     val notchConfig: NotchConfig = NotchConfig(),
     val isGlowEnabled: Boolean = true,
     val isCallerAlertActive: Boolean = false, // Set when phone is ringing
-    val showCenterHeart: Boolean = false,     // Rotes Herz in der Displaymitte
-    val showBorder: Boolean = true            // false: nur Herz, kein Rand
+    val colorOverride: Long? = null       // Laufzeit: Einzelfarbe für Alarm (App/Anruf), nicht gespeichert
 )

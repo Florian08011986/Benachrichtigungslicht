@@ -20,11 +20,15 @@ import androidx.core.app.NotificationCompat
 import com.example.MainActivity
 import com.example.R
 import com.example.data.EdgePreferencesRepository
+import com.example.data.OverlayRuntimeState
+import com.example.model.AnimationMode
 import com.example.model.BatterySaverConfig
+import com.example.model.PROCESSING_PULSE_COLORS
+import com.example.model.PulseCurve
 import com.example.model.BatteryStatus
-import com.example.model.BorderShapeType
 import com.example.model.EdgeConfig
 import com.example.model.EdgeScheduleConfig
+import com.example.model.LineStyle
 import com.example.rendering.EdgeLightRenderer
 import com.example.util.BatteryMonitor
 import kotlinx.coroutines.CoroutineScope
@@ -49,6 +53,11 @@ class EdgeOverlayService : Service() {
 
     private var isTemporaryAlertActive = false
     private var temporaryConfig: EdgeConfig? = null
+    private var lastSystemState: SystemState? = null
+    private var lastDisplayKind: DisplayKind = DisplayKind.NONE
+    private var lastIntroNonce: Long = 0L
+
+    private enum class DisplayKind { NONE, NORMAL, PROCESSING, PREVIEW, TEST }
 
     companion object {
         const val CHANNEL_ID = "edge_lighting_overlay_channel"
@@ -59,16 +68,20 @@ class EdgeOverlayService : Service() {
         const val ACTION_TRIGGER_CALLER_ALERT = "com.example.service.ACTION_TRIGGER_CALLER_ALERT"
         const val ACTION_CLEAR_CALLER_ALERT = "com.example.service.ACTION_CLEAR_CALLER_ALERT"
         const val ACTION_SHOW_NOTIF_ALERT = "com.example.service.ACTION_SHOW_NOTIF_ALERT"
+        const val ACTION_CLEAR_NOTIF_ALERT = "com.example.service.ACTION_CLEAR_NOTIF_ALERT"
+
+        /** Dauer 0 = leuchten, bis die Benachrichtigung entfernt wird (Sicherheitsdeckel 60 min). */
+        const val DURATION_UNTIL_DISMISSED = 0
+        private const val UNTIL_DISMISSED_CAP_S = 3600
+        private const val UNTIL_DISMISSED_WAKE_S = 8
 
         const val EXTRA_PALETTE_ID = "extra_palette_id"
         const val EXTRA_USE_CUSTOM_COLORS = "extra_use_custom_colors"
         const val EXTRA_CUSTOM_COLORS_CSV = "extra_custom_colors_csv"
-        const val EXTRA_SHAPE_TYPE = "extra_shape_type"
-        const val EXTRA_CUSTOM_EMOJI = "extra_custom_emoji"
+        const val EXTRA_LINE_STYLE = "extra_line_style"
         const val EXTRA_DURATION_SECONDS = "extra_duration_seconds"
         const val EXTRA_WAKE_SCREEN = "extra_wake_screen"
-        const val EXTRA_CENTER_HEART = "extra_center_heart"
-        const val EXTRA_SHOW_BORDER = "extra_show_border"
+        const val EXTRA_SINGLE_COLOR = "extra_single_color" // 0 = keine Einzelfarbe (Aura-Verlauf)
 
         fun startOverlay(context: Context) {
             val intent = Intent(context, EdgeOverlayService::class.java).apply {
@@ -96,24 +109,28 @@ class EdgeOverlayService : Service() {
             paletteId: Int,
             useCustomColors: Boolean,
             customColorsCsv: String,
-            shapeType: String,
-            customEmoji: String,
+            lineStyle: String,
             durationSeconds: Int,
             wakeScreen: Boolean,
-            centerHeart: Boolean = false,
-            showBorder: Boolean = true
+            singleColor: Long = 0L
         ) {
             val intent = Intent(context, EdgeOverlayService::class.java).apply {
                 action = ACTION_SHOW_NOTIF_ALERT
                 putExtra(EXTRA_PALETTE_ID, paletteId)
                 putExtra(EXTRA_USE_CUSTOM_COLORS, useCustomColors)
                 putExtra(EXTRA_CUSTOM_COLORS_CSV, customColorsCsv)
-                putExtra(EXTRA_SHAPE_TYPE, shapeType)
-                putExtra(EXTRA_CUSTOM_EMOJI, customEmoji)
+                putExtra(EXTRA_LINE_STYLE, lineStyle)
                 putExtra(EXTRA_DURATION_SECONDS, durationSeconds)
                 putExtra(EXTRA_WAKE_SCREEN, wakeScreen)
-                putExtra(EXTRA_CENTER_HEART, centerHeart)
-                putExtra(EXTRA_SHOW_BORDER, showBorder)
+                putExtra(EXTRA_SINGLE_COLOR, singleColor)
+            }
+            startServiceCompat(context, intent)
+        }
+
+        /** Beendet ein „bis gelesen“-Licht, sobald keine passende Benachrichtigung mehr offen ist. */
+        fun clearNotificationAlert(context: Context) {
+            val intent = Intent(context, EdgeOverlayService::class.java).apply {
+                action = ACTION_CLEAR_NOTIF_ALERT
             }
             startServiceCompat(context, intent)
         }
@@ -167,6 +184,12 @@ class EdgeOverlayService : Service() {
                     handleNotificationAlert(intent)
                 }
             }
+            ACTION_CLEAR_NOTIF_ALERT -> {
+                if (isTemporaryAlertActive) {
+                    notifAlertJob?.cancel()
+                    endNotificationAlert()
+                }
+            }
             ACTION_START -> {
                 ensureOverlayAttached()
             }
@@ -183,50 +206,58 @@ class EdgeOverlayService : Service() {
         val paletteId = intent.getIntExtra(EXTRA_PALETTE_ID, 0)
         val useCustom = intent.getBooleanExtra(EXTRA_USE_CUSTOM_COLORS, false)
         val customColorsCsv = intent.getStringExtra(EXTRA_CUSTOM_COLORS_CSV) ?: ""
-        val shapeName = intent.getStringExtra(EXTRA_SHAPE_TYPE) ?: BorderShapeType.CONTINUOUS_LINE.name
-        val customEmoji = intent.getStringExtra(EXTRA_CUSTOM_EMOJI) ?: ""
-        val durationSeconds = intent.getIntExtra(EXTRA_DURATION_SECONDS, 6).coerceIn(2, 30)
+        val styleName = intent.getStringExtra(EXTRA_LINE_STYLE) ?: LineStyle.RING.name
+        val requested = intent.getIntExtra(EXTRA_DURATION_SECONDS, 6)
+        val untilDismissed = requested == DURATION_UNTIL_DISMISSED
+        val durationSeconds = if (untilDismissed) UNTIL_DISMISSED_CAP_S else requested.coerceIn(2, 30)
         val wakeScreen = intent.getBooleanExtra(EXTRA_WAKE_SCREEN, true)
-        val centerHeart = intent.getBooleanExtra(EXTRA_CENTER_HEART, false)
-        val showBorder = intent.getBooleanExtra(EXTRA_SHOW_BORDER, true)
+        val singleColor = intent.getLongExtra(EXTRA_SINGLE_COLOR, 0L).takeIf { it != 0L }
 
         val customColors = customColorsCsv.split(",")
             .mapNotNull { it.trim().toLongOrNull() }
 
-        val shape = try {
-            BorderShapeType.valueOf(shapeName)
-        } catch (_: Exception) {
-            BorderShapeType.CONTINUOUS_LINE
-        }
+        val style = LineStyle.entries.firstOrNull { it.name == styleName } ?: LineStyle.RING
 
         val baseConfig = repository.configFlow.value
         temporaryConfig = baseConfig.copy(
             selectedPaletteId = paletteId,
             useCustomColors = useCustom,
             customColors = if (useCustom && customColors.isNotEmpty()) customColors else baseConfig.customColors,
-            shapeType = shape,
-            customEmoji = customEmoji.ifBlank { baseConfig.customEmoji },
+            lineStyle = style,
             isCallerAlertActive = true,
-            showCenterHeart = centerHeart,
-            showBorder = showBorder
+            colorOverride = singleColor
         )
 
         isTemporaryAlertActive = true
 
         if (wakeScreen) {
-            acquireWakeLock(durationSeconds)
+            // Bildschirm nur kurz wecken – auch wenn das Licht bis zum Wegwischen läuft (Akku)
+            acquireWakeLock(if (untilDismissed) UNTIL_DISMISSED_WAKE_S else durationSeconds)
         }
 
         ensureOverlayAttached()
         overlayView?.updateConfig(temporaryConfig ?: baseConfig)
+        if (baseConfig.isTwoStageStartEnabled) overlayView?.startIntro()
 
         notifAlertJob?.cancel()
         notifAlertJob = serviceScope.launch {
             delay(durationSeconds * 1000L)
-            isTemporaryAlertActive = false
-            temporaryConfig = null
-            releaseWakeLock()
+            if (untilDismissed) repository.clearPendingAlertKeys()
+            endNotificationAlert()
+        }
+    }
 
+    /** Beendet den Benachrichtigungs-Alarm und kehrt zum Grundzustand zurück. */
+    private fun endNotificationAlert() {
+        isTemporaryAlertActive = false
+        temporaryConfig = null
+        releaseWakeLock()
+
+        // Zurück zum Grundzustand (Dauerlicht, Live-Vorschau oder Verarbeitungs-Puls bleiben erhalten)
+        val state = lastSystemState
+        if (state != null) {
+            applySystemState(state)
+        } else {
             removeOverlay()
             stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
@@ -327,53 +358,100 @@ class EdgeOverlayService : Service() {
                 repository.configFlow,
                 repository.scheduleConfigFlow,
                 repository.batterySaverConfigFlow,
-                batteryMonitor.status
-            ) { config, schedule, batterySaver, batteryStatus ->
-                SystemState(config, schedule, batterySaver, batteryStatus)
+                batteryMonitor.status,
+                repository.runtimeState
+            ) { config, schedule, batterySaver, batteryStatus, runtime ->
+                SystemState(config, schedule, batterySaver, batteryStatus, runtime)
             }.collect { state ->
-                val isDnd = state.schedule.isCurrentlyInDnd()
-                val isLowBatteryMode = state.batterySaver.shouldApplyBatterySaver(
-                    state.batteryStatus.levelPercent,
-                    state.batteryStatus.isPowerSaveMode,
-                    state.batteryStatus.isCharging
-                )
-
-                if (!isTemporaryAlertActive) {
-                    val shouldBeVisible = (state.config.isOverlayEnabled || state.config.isCallerAlertActive) && !isDnd
-                    if (!shouldBeVisible) {
-                        removeOverlay()
-                        if (!state.config.isCallerAlertActive) {
-                            stopForeground(STOP_FOREGROUND_REMOVE)
-                            stopSelf()
-                        }
-                    } else {
-                        ensureOverlayAttached()
-                        overlayView?.setBatterySaverMode(
-                            active = isLowBatteryMode,
-                            reduceFps = state.batterySaver.reduceFpsTo30,
-                            dimMultiplier = state.batterySaver.dimIntensityPercent / 100f,
-                            disableGlow = state.batterySaver.disableGlowFilter
-                        )
-                        overlayView?.updateConfig(state.config)
-                    }
-                } else {
-                    // Alert is active: apply battery settings even to alert
-                    overlayView?.setBatterySaverMode(
-                        active = isLowBatteryMode,
-                        reduceFps = state.batterySaver.reduceFpsTo30,
-                        dimMultiplier = state.batterySaver.dimIntensityPercent / 100f,
-                        disableGlow = state.batterySaver.disableGlowFilter
-                    )
-                }
+                lastSystemState = state
+                applySystemState(state)
             }
         }
     }
+
+    /** Entscheidet Sichtbarkeit und angezeigte Konfiguration. Priorität: Puls-Test > Live-Vorschau > Verarbeitung > Normal. */
+    private fun applySystemState(state: SystemState) {
+        val isDnd = state.schedule.isCurrentlyInDnd()
+        val isLowBatteryMode = state.batterySaver.shouldApplyBatterySaver(
+            state.batteryStatus.levelPercent,
+            state.batteryStatus.isPowerSaveMode,
+            state.batteryStatus.isCharging
+        )
+
+        overlayView?.setBatterySaverMode(
+            active = isLowBatteryMode,
+            reduceFps = state.batterySaver.reduceFpsTo30,
+            dimMultiplier = state.batterySaver.dimIntensityPercent / 100f,
+            disableGlow = state.batterySaver.disableGlowFilter
+        )
+        if (isTemporaryAlertActive) return
+
+        val runtime = state.runtime
+        val processingShown = runtime.processingTestActive ||
+                (runtime.processingActive && state.config.isProcessingPulseEnabled && !isDnd)
+        val normalShown = (state.config.isOverlayEnabled || state.config.isCallerAlertActive) && !isDnd
+
+        val kind = when {
+            runtime.processingTestActive -> DisplayKind.TEST
+            runtime.previewActive -> DisplayKind.PREVIEW
+            processingShown -> DisplayKind.PROCESSING
+            normalShown -> DisplayKind.NORMAL
+            else -> DisplayKind.NONE
+        }
+        val displayConfig: EdgeConfig? = when (kind) {
+            DisplayKind.TEST, DisplayKind.PROCESSING -> processingConfig(state.config)
+            DisplayKind.PREVIEW, DisplayKind.NORMAL ->
+                // Eingehender Anruf: Ring in der Anruf-Farbe
+                if (state.config.isCallerAlertActive) state.config.copy(colorOverride = state.config.callColor)
+                else state.config
+            DisplayKind.NONE -> null
+        }
+        val kindChanged = kind != lastDisplayKind
+        lastDisplayKind = kind
+
+        if (displayConfig == null) {
+            removeOverlay()
+            if (!state.config.isCallerAlertActive) {
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelf()
+            }
+            return
+        }
+
+        ensureOverlayAttached()
+        overlayView?.setBatterySaverMode(
+            active = isLowBatteryMode,
+            reduceFps = state.batterySaver.reduceFpsTo30,
+            dimMultiplier = state.batterySaver.dimIntensityPercent / 100f,
+            disableGlow = state.batterySaver.disableGlowFilter
+        )
+        overlayView?.updateConfig(displayConfig)
+
+        // Zwei-Stufen-Start: bei neuem Anzeigegrund (z. B. Vorgang beginnt) oder auf Wunsch („Ansehen“)
+        val replayRequested = runtime.introNonce != lastIntroNonce
+        lastIntroNonce = runtime.introNonce
+        if (replayRequested || (kindChanged && kind != DisplayKind.PREVIEW && state.config.isTwoStageStartEnabled)) {
+            overlayView?.startIntro()
+        }
+    }
+
+    /** Blaues, atmendes Leuchten für laufende Vorgänge – Geometrie & Pulsgeschwindigkeit vom Nutzer. */
+    private fun processingConfig(base: EdgeConfig): EdgeConfig = base.copy(
+        useCustomColors = true,
+        customColors = PROCESSING_PULSE_COLORS,
+        lineStyle = LineStyle.AURA,
+        pulseCurve = PulseCurve.BREATH,
+        animationMode = AnimationMode.PULSE,
+        isGlowEnabled = true,
+        isCallerAlertActive = false
+    )
 
     private data class SystemState(
         val config: EdgeConfig,
         val schedule: EdgeScheduleConfig,
         val batterySaver: BatterySaverConfig,
-        val batteryStatus: BatteryStatus
+        val batteryStatus: BatteryStatus,
+        val runtime: OverlayRuntimeState
     )
 
     private fun createNotificationChannel() {
@@ -470,6 +548,11 @@ class EdgeOverlayView(context: Context) : View(context) {
         if (changed) {
             postInvalidateOnAnimation()
         }
+    }
+
+    fun startIntro() {
+        renderer.startIntro()
+        postInvalidateOnAnimation()
     }
 
     fun updateConfig(newConfig: EdgeConfig) {
